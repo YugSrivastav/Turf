@@ -700,21 +700,31 @@ impl TerminalCockpit {
             return true;
         }
 
-        // --- 2. Detach shortcut (Alt+D) ---
-        if key.modifiers.contains(KeyModifiers::ALT)
-            && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D'))
+        // --- 2. Detach shortcut (Alt+D or F4) ---
+        if key.code == KeyCode::F(4)
+            || (key.modifiers.contains(KeyModifiers::ALT)
+                && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D')))
         {
             self.detach();
             return true;
         }
 
-        // --- 3. Alt+Enter toggles prompt focus ---
-        if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Enter {
+        // --- 3. Toggle prompt focus (F2, Alt+P, or Alt+Enter) ---
+        if key.code == KeyCode::F(2)
+            || (key.modifiers.contains(KeyModifiers::ALT)
+                && (key.code == KeyCode::Enter || matches!(key.code, KeyCode::Char('p') | KeyCode::Char('P'))))
+        {
             self.focus = if self.focus == FocusArea::Input {
                 FocusArea::Terminal
             } else {
                 FocusArea::Input
             };
+            return true;
+        }
+
+        // --- 3b. F3 cycles split panes (safe on all keyboard layouts) ---
+        if key.code == KeyCode::F(3) {
+            self.cycle_pane_focus();
             return true;
         }
 
@@ -764,7 +774,7 @@ impl TerminalCockpit {
                     self.split_active_pane_auto(SplitDirection::Vertical);
                     return true;
                 }
-                KeyCode::Char('s') | KeyCode::Char('S') => {
+                KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('h') | KeyCode::Char('H') => {
                     self.split_active_pane_auto(SplitDirection::Horizontal);
                     return true;
                 }
@@ -992,17 +1002,17 @@ impl TerminalCockpit {
             "",
             " Alt+T / Alt+W      New tab / Close tab",
             " Alt+1..9           Switch active tab",
-            " Alt+V / Alt+S      Vertical / Horizontal split",
-            " Alt+O / Alt+X      Cycle split pane / Close pane",
+            " Alt+V / Alt+H      Vertical / Horizontal split",
+            " F3 / Alt+O         Cycle split pane (Alt+X close)",
             " Alt+B              Toggle Intent Board sidebar",
-            " Alt+Enter          Toggle prompt focus (Tab cycles)",
+            " F2 / Alt+P         Toggle prompt focus (Tab cycles)",
             " Alt+Up / Alt+Down  Scroll history (Esc snaps back)",
-            " Alt+D / Ctrl+Q     Detach daemon / Quit cockpit",
+            " F4 / Alt+D         Detach daemon (Ctrl+Q quits)",
             "",
             " Prompt: /task <title>  /lock <file>  /unlock <file>",
             "         /split  /split-h  /next  /close  /tab  /quit",
             "",
-            " Press Esc or ? to close ",
+            " Press Esc, F1, or ? to close ",
         ];
 
         let box_w = 56u16.min(area.width.saturating_sub(2));

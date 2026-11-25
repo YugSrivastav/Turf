@@ -32,6 +32,7 @@ pub struct DaemonPane {
     pub id: usize,
     pub session_name: String,
     pub tab_id: usize,
+    pub cwd: Option<String>,
     pub terminal: Arc<Mutex<Terminal>>,
     pub pty_writer: PtyWriter,
     pub pty_handle: Arc<Mutex<PtyProcessHandle>>,
@@ -586,15 +587,15 @@ impl TurfDaemonServer {
                 pane_id,
                 direction: _,
             } => {
-                let (session_name, tab_id) = {
+                let (session_name, tab_id, parent_cwd) = {
                     let panes = self.state.panes.lock().await;
                     panes
                         .get(&pane_id)
-                        .map(|p| (Some(p.session_name.clone()), p.tab_id))
-                        .unwrap_or((None, 1))
+                        .map(|p| (Some(p.session_name.clone()), p.tab_id, p.cwd.clone()))
+                        .unwrap_or((None, 1, None))
                 };
                 match self
-                    .spawn_pane_internal(session_name, tab_id, None, None)
+                    .spawn_pane_internal(session_name, tab_id, parent_cwd, None)
                     .await
                 {
                     Ok(new_id) => DaemonResponse::PaneSpawned { pane_id: new_id },
@@ -663,6 +664,7 @@ impl TurfDaemonServer {
         let s_name = session_name.unwrap_or_else(|| "default".to_string());
 
         let mut options = PtyOptions::new(24, 80);
+        let cwd_stored = cwd.clone();
         if let Some(dir) = cwd {
             options.working_dir = Some(PathBuf::from(dir));
         }
@@ -731,6 +733,7 @@ impl TurfDaemonServer {
             id: pane_id,
             session_name: s_name.clone(),
             tab_id,
+            cwd: cwd_stored,
             terminal,
             pty_writer: writer,
             pty_handle,

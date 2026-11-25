@@ -637,4 +637,22 @@ fn test_utf8_input_state_and_help_overlay_and_dedup_locks() {
             .scroll_offset(),
         0
     );
+
+    // 6. Universal Windows-Terminal-safe bindings: F2 / Alt+P, Alt+H, F3, F4
+    assert_eq!(cockpit.focus, FocusArea::Terminal);
+    cockpit.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+    assert_eq!(cockpit.focus, FocusArea::Input);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    assert_eq!(cockpit.focus, FocusArea::Terminal);
+
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT));
+    assert_eq!(cockpit.tabs[0].pane_manager.pane_count(), 2);
+    let second_id = cockpit.tabs[0].pane_manager.active_pane_id();
+    cockpit.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+    assert_ne!(cockpit.tabs[0].pane_manager.active_pane_id(), second_id);
+
+    assert!(!cockpit.is_detached);
+    cockpit.handle_key(KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE));
+    assert!(cockpit.is_detached);
+    assert!(cockpit.should_exit);
 }

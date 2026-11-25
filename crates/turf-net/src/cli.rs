@@ -39,7 +39,7 @@ pub fn print_help() {
 \x1b[2mUSAGE:\x1b[0m
   \x1b[32mturfcode\x1b[0m                          Open interactive launcher menu (Create or Join a Turf)
   \x1b[32mturf\x1b[0m                              Alias for turfcode
-  \x1b[32mturf host [dir]\x1b[0m                   Host a shared Turf session in the given directory (default: .)
+  \x1b[32mturf host [dir] [--open-folder]\x1b[0m   Host a shared Turf session in the given directory (default: .)
   \x1b[32mturf join <id> [url]\x1b[0m              Join an active Turf session using room code
   \x1b[32mturf list\x1b[0m                         List active daemon sessions
   \x1b[32mturf attach [name]\x1b[0m                Attach interactive TUI client to a named session (default: default)
@@ -57,13 +57,13 @@ pub fn print_help() {
 \x1b[2mCOCKPIT SHORTCUTS:\x1b[0m
   Alt+T / Alt+W      New tab / Close tab
   Alt+1..9           Switch tab
-  Alt+V / Alt+S      Vertical / Horizontal split
-  Alt+O / Alt+X      Next split pane / Close active pane
+  Alt+V / Alt+H      Vertical / Horizontal split (or Alt+S)
+  F3 / Alt+O         Next split pane (Alt+X closes pane)
   Alt+B              Toggle Intent Board sidebar
-  Alt+Enter          Toggle command prompt focus
+  F2 / Alt+P         Toggle command prompt focus (or Alt+Enter)
   Alt+Up / Alt+Down  Scroll terminal history
-  Alt+? / F1         Show shortcuts & slash commands
-  Alt+D / Ctrl+Q     Detach (keep running) / Quit
+  F1 / Alt+?         Show shortcuts & slash commands
+  F4 / Alt+D         Detach (keep running) / Ctrl+Q quits
 "
     );
 }
@@ -142,8 +142,22 @@ pub fn normalize_workspace_path(input: &str) -> PathBuf {
     }
 }
 
-/// Detect the current git branch for a workspace directory.
+/// Detect the current git branch for a workspace directory (including unborn branches).
 fn detect_git_branch(target_dir: &Path) -> Option<String> {
+    if let Ok(out) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(target_dir)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+    {
+        if out.status.success() {
+            let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !branch.is_empty() {
+                return Some(branch);
+            }
+        }
+    }
+
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(target_dir)
@@ -689,7 +703,9 @@ pub async fn run_interactive_prompt() -> Result<(), NetError> {
             let mut dir_line = String::new();
             stdin.lock().read_line(&mut dir_line).ok();
             let target_dir = normalize_workspace_path(&dir_line);
-            open_file_manager(&target_dir);
+            if env::args().any(|a| a == "--open" || a == "--open-folder") {
+                open_file_manager(&target_dir);
+            }
             run_host(&target_dir, 0).await?;
         }
         "2" => {
@@ -1094,9 +1110,12 @@ pub async fn handle_pane_cli(subargs: &[String]) -> Result<(), Box<dyn std::erro
 /// Main CLI entry point.
 pub async fn main_cli() -> Result<(), Box<dyn std::error::Error>> {
     let raw_args: Vec<String> = env::args().collect();
+    let open_folder = raw_args
+        .iter()
+        .any(|a| a == "--open" || a == "--open-folder");
     let args: Vec<String> = raw_args
         .into_iter()
-        .filter(|a| a != "--no-cockpit")
+        .filter(|a| a != "--no-cockpit" && a != "--open" && a != "--open-folder")
         .collect();
 
     if args.len() <= 1 {
@@ -1158,7 +1177,9 @@ pub async fn main_cli() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 normalize_workspace_path(".")
             };
-            open_file_manager(&target);
+            if open_folder {
+                open_file_manager(&target);
+            }
             run_host(&target, 0).await?;
         }
         "join" => {

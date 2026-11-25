@@ -114,14 +114,14 @@ turf daemon start|stop|status    Manage the persistent background daemon
 | `Alt+T` | Open a new tab |
 | `Alt+W` | Close active tab |
 | `Alt+1` .. `Alt+9` | Switch to tab `1..9` |
-| `Alt+V` / `Alt+S` | Split pane vertically / horizontally |
-| `Alt+O` / `Alt+X` | Cycle split panes / Close active pane |
+| `Alt+V` / `Alt+H` *(or `Alt+S`)* | Split pane vertically / horizontally |
+| `F3` / `Alt+O` / `Alt+X` | Cycle split panes / Close active pane |
 | `Alt+B` | Toggle Intent Board sidebar |
-| `Alt+Enter` | Toggle bottom command prompt focus |
+| `F2` / `Alt+P` *(or `Alt+Enter`)* | Toggle bottom command prompt focus |
 | `Alt+Up` / `Alt+Down` | Scroll viewport history up / down |
 | `Shift+PageUp` / `Shift+PageDown` | Page through scrollback history |
-| `Alt+?` / `F1` | Show shortcuts & slash commands overlay |
-| `Alt+D` | Detach from daemon session (keeps processes running) |
+| `F1` / `Alt+?` | Show shortcuts & slash commands overlay |
+| `F4` / `Alt+D` | Detach from daemon session (keeps processes running) |
 | `Ctrl+Q` / `Alt+Q` | Quit cockpit |
 
 ---
