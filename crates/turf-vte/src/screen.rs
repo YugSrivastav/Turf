@@ -204,6 +204,69 @@ impl ScreenBuffer {
         }
     }
 
+    /// Insert `count` blank characters at `(x, y)`, shifting existing characters right (ICH).
+    pub fn insert_chars(&mut self, x: usize, y: usize, count: usize) {
+        if let Some(row) = self.cells.get_mut(y) {
+            if x >= self.cols {
+                return;
+            }
+            let n = count.min(self.cols - x);
+            for _ in 0..n {
+                row.pop();
+                row.insert(x, Cell::default());
+            }
+        }
+    }
+
+    /// Delete `count` characters at `(x, y)`, shifting remaining characters left (DCH).
+    pub fn delete_chars(&mut self, x: usize, y: usize, count: usize) {
+        if let Some(row) = self.cells.get_mut(y) {
+            if x >= self.cols {
+                return;
+            }
+            let n = count.min(self.cols - x);
+            for _ in 0..n {
+                row.remove(x);
+                row.push(Cell::default());
+            }
+        }
+    }
+
+    /// Erase `count` characters starting at `(x, y)` without shifting (ECH).
+    pub fn erase_chars(&mut self, x: usize, y: usize, count: usize) {
+        if let Some(row) = self.cells.get_mut(y) {
+            let end = (x + count).min(self.cols);
+            for cell in &mut row[x.min(self.cols)..end] {
+                cell.reset();
+            }
+        }
+    }
+
+    /// Insert `count` blank lines at `y` within scrolling margins (IL).
+    pub fn insert_lines(&mut self, y: usize, count: usize) {
+        if y < self.scroll_top || y > self.scroll_bottom || self.scroll_bottom >= self.rows {
+            return;
+        }
+        let n = count.min(self.scroll_bottom - y + 1);
+        for _ in 0..n {
+            self.cells.remove(self.scroll_bottom);
+            self.cells.insert(y, vec![Cell::default(); self.cols]);
+        }
+    }
+
+    /// Delete `count` lines at `y` within scrolling margins (DL).
+    pub fn delete_lines(&mut self, y: usize, count: usize) {
+        if y < self.scroll_top || y > self.scroll_bottom || self.scroll_bottom >= self.rows {
+            return;
+        }
+        let n = count.min(self.scroll_bottom - y + 1);
+        for _ in 0..n {
+            self.cells.remove(y);
+            self.cells
+                .insert(self.scroll_bottom, vec![Cell::default(); self.cols]);
+        }
+    }
+
     /// Render visible viewport rows taking into account the historical `offset` and requested row `count`.
     ///
     /// When `offset == 0`, returns the live bottom grid rows.

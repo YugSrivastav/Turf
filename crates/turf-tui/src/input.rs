@@ -19,21 +19,40 @@ pub struct InputState {
 }
 
 impl InputState {
+    fn char_len(&self) -> usize {
+        self.value.chars().count()
+    }
+
+    fn char_to_byte_idx(&self, char_idx: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_idx)
+            .map(|(byte_idx, _)| byte_idx)
+            .unwrap_or(self.value.len())
+    }
+
     pub fn insert_char(&mut self, c: char) {
-        self.value.insert(self.cursor_pos, c);
-        self.cursor_pos += 1;
+        let clamped = self.cursor_pos.min(self.char_len());
+        let byte_idx = self.char_to_byte_idx(clamped);
+        self.value.insert(byte_idx, c);
+        self.cursor_pos = clamped + 1;
     }
 
     pub fn backspace(&mut self) {
-        if self.cursor_pos > 0 {
-            self.cursor_pos -= 1;
-            self.value.remove(self.cursor_pos);
+        let clamped = self.cursor_pos.min(self.char_len());
+        if clamped > 0 {
+            let new_char_pos = clamped - 1;
+            let byte_idx = self.char_to_byte_idx(new_char_pos);
+            self.value.remove(byte_idx);
+            self.cursor_pos = new_char_pos;
         }
     }
 
     pub fn delete(&mut self) {
-        if self.cursor_pos < self.value.len() {
-            self.value.remove(self.cursor_pos);
+        let len = self.char_len();
+        if self.cursor_pos < len {
+            let byte_idx = self.char_to_byte_idx(self.cursor_pos);
+            self.value.remove(byte_idx);
         }
     }
 
@@ -44,7 +63,7 @@ impl InputState {
     }
 
     pub fn move_cursor_right(&mut self) {
-        if self.cursor_pos < self.value.len() {
+        if self.cursor_pos < self.char_len() {
             self.cursor_pos += 1;
         }
     }
@@ -54,7 +73,7 @@ impl InputState {
     }
 
     pub fn move_cursor_end(&mut self) {
-        self.cursor_pos = self.value.len();
+        self.cursor_pos = self.char_len();
     }
 
     pub fn submit(&mut self) -> Option<String> {
@@ -83,7 +102,7 @@ impl InputState {
         self.history_index = Some(next_idx);
         if let Some(cmd) = self.history.get(next_idx) {
             self.value = cmd.clone();
-            self.cursor_pos = self.value.len();
+            self.cursor_pos = self.char_len();
         }
     }
 
@@ -93,7 +112,7 @@ impl InputState {
                 self.history_index = Some(idx + 1);
                 if let Some(cmd) = self.history.get(idx + 1) {
                     self.value = cmd.clone();
-                    self.cursor_pos = self.value.len();
+                    self.cursor_pos = self.char_len();
                 }
             } else {
                 self.history_index = None;
@@ -162,14 +181,22 @@ pub fn render_input_bar(
         .saturating_sub(prefix.len() as u16)
         .saturating_sub(helper_len as u16 + 2);
 
-    // Render input string
+    // Render input string with horizontal scroll window so cursor stays visible
     let chars: Vec<char> = state.value.chars().collect();
-    for (i, &ch) in chars.iter().enumerate() {
-        if (i as u16) >= input_available_w {
-            break;
-        }
+    let avail = input_available_w as usize;
+    let scroll_start = if avail == 0 {
+        0
+    } else if state.cursor_pos >= avail {
+        state.cursor_pos + 1 - avail
+    } else {
+        0
+    };
+
+    let visible_chars = &chars[scroll_start..chars.len().min(scroll_start + avail)];
+    for (i, &ch) in visible_chars.iter().enumerate() {
+        let abs_idx = scroll_start + i;
         let px = cursor_x + i as u16;
-        let is_cursor = is_focused && i == state.cursor_pos;
+        let is_cursor = is_focused && abs_idx == state.cursor_pos;
         let style = if is_cursor {
             Style::default()
                 .bg(COLOR_ACCENT)
@@ -186,7 +213,8 @@ pub fn render_input_bar(
 
     // Render block cursor if at end of string
     if is_focused && state.cursor_pos == chars.len() {
-        let px = cursor_x + chars.len() as u16;
+        let rel_pos = state.cursor_pos.saturating_sub(scroll_start);
+        let px = cursor_x + rel_pos as u16;
         if px < input_area.x + input_area.width {
             let cell = &mut buf[(px, input_area.y)];
             cell.set_char('█');

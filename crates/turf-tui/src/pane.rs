@@ -652,7 +652,16 @@ impl PaneManager {
         let closing_id = self.active_pane_id;
         if let Some(new_tree) = self.tree.remove_pane(closing_id) {
             self.tree = new_tree;
-            self.panes.remove(&closing_id);
+            if let Some(removed) = self.panes.remove(&closing_id) {
+                if let PaneBackend::Daemon { pane_id, client } = removed.backend {
+                    let pid = pane_id as usize;
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        handle.spawn(async move {
+                            let _ = client.close_pane(pid).await;
+                        });
+                    }
+                }
+            }
             let ids = self.tree.pane_ids();
             if !ids.is_empty() {
                 self.active_pane_id = ids[0];
@@ -711,14 +720,19 @@ impl PaneManager {
                 if r.y > area.y {
                     let header_y = r.y.saturating_sub(1);
                     if let Some(pane) = self.panes.get(id) {
-                        let badge = format!(" {} ", pane.display_badge());
+                        let active_marker = if *id == self.active_pane_id { " ●" } else { "" };
+                        let badge = format!("{} {} ", active_marker, pane.display_badge());
                         let mut hx = r.x.saturating_add(2);
                         for ch in badge.chars() {
                             if hx < r.x + r.width && hx < area.x + area.width {
                                 let cell = &mut buf[(hx, header_y)];
                                 cell.set_char(ch);
-                                cell.set_style(Theme::inactive_tab());
-                                cell.set_bg(COLOR_BG);
+                                if *id == self.active_pane_id {
+                                    cell.set_style(Theme::active_tab_pill());
+                                } else {
+                                    cell.set_style(Theme::inactive_tab());
+                                    cell.set_bg(COLOR_BG);
+                                }
                                 hx += 1;
                             }
                         }

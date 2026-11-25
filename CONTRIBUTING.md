@@ -48,6 +48,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets
 cargo test --workspace
 
+# Real-user interactive PTY E2E suite (Linux/macOS/WSL with tmux)
+bash test/e2e-pty.sh
+
 # Node.js dependencies & tests
 npm ci
 npm test

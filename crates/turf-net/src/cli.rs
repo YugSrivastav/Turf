@@ -37,24 +37,33 @@ pub fn print_help() {
         "\x1b[1;32mTURFCODE CLI\x1b[0m — \x1b[37mReal-time multiplayer AI coding in the terminal\x1b[0m
 
 \x1b[2mUSAGE:\x1b[0m
-  \x1b[32mturfcode\x1b[0m                         Open interactive launcher menu (Create or Join a Turf)
-  \x1b[32mturf\x1b[0m                             Alias for turfcode
-  \x1b[32mturf host [dir]\x1b[0m                  Host a shared Turf session in the given directory (default: .)
-  \x1b[32mturf join <id> [url]\x1b[0m             Join an active Turf session using room code
-  \x1b[32mturf list\x1b[0m                        List active daemon sessions
-  \x1b[32mturf attach [name]\x1b[0m              Attach interactive TUI client to a named session (default: default)
-  \x1b[32mturf session list\x1b[0m               List active sessions and pane counts
-  \x1b[32mturf session new <name>\x1b[0m         Spawn a detached named session
-  \x1b[32mturf session attach <name>\x1b[0m      Attach interactive TUI client to a named session
-  \x1b[32mturf session kill <name>\x1b[0m        Terminate a named session and reap its child PTYs
-  \x1b[32mturf pane read <id> [--lines N]\x1b[0m Read captured screen buffer text from a pane
-  \x1b[32mturf pane send-keys <id> <text>\x1b[0m Inject keystrokes or text directly into pane PTY
-  \x1b[32mturf pane split <id> [-d h|v]\x1b[0m   Programmatically split a pane
-  \x1b[32mturf daemon start\x1b[0m                Start the persistent background daemon
-  \x1b[32mturf daemon stop\x1b[0m                 Stop the running background daemon
-  \x1b[32mturf daemon status\x1b[0m               Show background daemon process and socket status
-  \x1b[32mturf --help, -h\x1b[0m                  Show this help information
-  \x1b[32mturf --version, -v\x1b[0m               Show version
+  \x1b[32mturfcode\x1b[0m                          Open interactive launcher menu (Create or Join a Turf)
+  \x1b[32mturf\x1b[0m                              Alias for turfcode
+  \x1b[32mturf host [dir]\x1b[0m                   Host a shared Turf session in the given directory (default: .)
+  \x1b[32mturf join <id> [url]\x1b[0m              Join an active Turf session using room code
+  \x1b[32mturf list\x1b[0m                         List active daemon sessions
+  \x1b[32mturf attach [name]\x1b[0m                Attach interactive TUI client to a named session (default: default)
+  \x1b[32mturf session list\x1b[0m                 List active sessions and pane counts
+  \x1b[32mturf session new <name>\x1b[0m           Spawn a detached named session
+  \x1b[32mturf session attach <name>\x1b[0m        Attach interactive TUI client to a named session
+  \x1b[32mturf session kill <name>\x1b[0m          Terminate a named session and reap its child PTYs
+  \x1b[32mturf pane read <id> [--lines N]\x1b[0m   Read captured screen buffer text from a pane
+  \x1b[32mturf pane send-keys <id> <text>\x1b[0m   Inject keystrokes or text directly into pane PTY
+  \x1b[32mturf pane split <id> [-d h|v]\x1b[0m     Programmatically split a pane
+  \x1b[32mturf daemon start|stop|status\x1b[0m     Manage the persistent background daemon
+  \x1b[32mturf --help, -h\x1b[0m                   Show this help information
+  \x1b[32mturf --version, -v\x1b[0m                Show version
+
+\x1b[2mCOCKPIT SHORTCUTS:\x1b[0m
+  Alt+T / Alt+W      New tab / Close tab
+  Alt+1..9           Switch tab
+  Alt+V / Alt+S      Vertical / Horizontal split
+  Alt+O / Alt+X      Next split pane / Close active pane
+  Alt+B              Toggle Intent Board sidebar
+  Alt+Enter          Toggle command prompt focus
+  Alt+Up / Alt+Down  Scroll terminal history
+  Alt+? / F1         Show shortcuts & slash commands
+  Alt+D / Ctrl+Q     Detach (keep running) / Quit
 "
     );
 }
@@ -133,6 +142,25 @@ pub fn normalize_workspace_path(input: &str) -> PathBuf {
     }
 }
 
+/// Detect the current git branch for a workspace directory.
+fn detect_git_branch(target_dir: &Path) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(target_dir)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
 /// Boot the interactive cockpit backed by the background daemon thin client,
 /// falling back cleanly to in-process standalone mode if daemon is unavailable.
 pub async fn run_interactive_choice(
@@ -142,17 +170,31 @@ pub async fn run_interactive_choice(
     rows: u16,
     cols: u16,
 ) -> TerminalCockpit {
+    run_interactive_choice_with_cwd(session_code, role, username, rows, cols, None).await
+}
+
+/// Boot the interactive cockpit backed by the background daemon thin client
+/// with an optional working directory for newly spawned panes.
+pub async fn run_interactive_choice_with_cwd(
+    session_code: &str,
+    role: &str,
+    username: &str,
+    rows: u16,
+    cols: u16,
+    cwd: Option<&Path>,
+) -> TerminalCockpit {
     match turf_daemon::ensure_daemon_running().await {
         Ok(sock_path) => {
             match turf_daemon::DaemonClient::connect(&sock_path).await {
                 Ok(client) => {
-                    match TerminalCockpit::new_daemon(
+                    match TerminalCockpit::new_daemon_with_cwd(
                         client,
                         session_code,
                         role,
                         username,
                         rows,
                         cols,
+                        cwd,
                     )
                     .await
                     {
@@ -246,12 +288,13 @@ pub async fn run_host(target_dir: &Path, port: u16) -> Result<(), NetError> {
         let mut terminal = Terminal::new(backend)?;
         let size = terminal.size()?;
 
-        let mut cockpit = run_interactive_choice(
+        let mut cockpit = run_interactive_choice_with_cwd(
             &room_code,
             "HOST",
             &username,
             size.height,
             size.width,
+            Some(target_dir),
         )
         .await;
 
@@ -261,6 +304,9 @@ pub async fn run_host(target_dir: &Path, port: u16) -> Result<(), NetError> {
             .unwrap_or("turfcode")
             .to_string();
         cockpit.sidebar_state.current_space = space_name;
+        if let Some(branch) = detect_git_branch(target_dir) {
+            cockpit.sidebar_state.current_branch = branch;
+        }
         cockpit.sidebar_state.peers = vec![PeerInfo {
             name: username.clone(),
             role: "HOST".to_string(),
@@ -561,7 +607,14 @@ pub async fn run_join(room_code: &str, ws_url: &str) -> Result<(), NetError> {
 
 /// Attach directly to a running or new TurfCode daemon session.
 pub async fn run_attach(session_code: &str) -> Result<(), NetError> {
-    let clean_code = crypto::normalize_room_code(session_code);
+    let trimmed = session_code.trim();
+    let clean_code = if trimmed.is_empty() {
+        "default".to_string()
+    } else if trimmed.to_ascii_lowercase().starts_with("turf-") {
+        crypto::normalize_room_code(trimmed)
+    } else {
+        trimmed.to_string()
+    };
     let username = env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "User".into());
@@ -882,6 +935,13 @@ pub async fn handle_session_cli(subargs: &[String]) -> Result<(), Box<dyn std::e
                 }
             };
             let sock_path = turf_daemon::default_socket_path();
+            if !turf_daemon::probe_daemon(&sock_path).await {
+                eprintln!(
+                    "\x1b[1;33mTurfCode daemon is not running\x1b[0m (socket at {}).",
+                    sock_path.display()
+                );
+                std::process::exit(1);
+            }
             let client = turf_daemon::DaemonClient::connect(&sock_path).await?;
             client.kill_session(name).await?;
             println!(
@@ -900,10 +960,57 @@ pub async fn handle_session_cli(subargs: &[String]) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+/// Convert `turf pane send-keys` argument tokens into a single string understood by `parse_keys`,
+/// translating special key tokens like `Enter`, `Tab`, `C-c`, `Up`, etc. even when mixed with text.
+fn encode_send_keys_args(args: &[String]) -> String {
+    if args.len() == 1 {
+        return args[0].clone();
+    }
+
+    let mut out = String::new();
+    let mut prev_was_text = false;
+    for token in args {
+        let mapped_special: Option<&str> = match token.as_str() {
+            "Enter" | "ENTER" | "Return" | "RETURN" => Some("\r"),
+            "Space" | "SPACE" => Some(" "),
+            "Tab" | "TAB" => Some("\t"),
+            "Backspace" | "BACKSPACE" => Some("\x7f"),
+            "Escape" | "Esc" | "ESC" => Some("\x1b"),
+            "Up" | "UP" => Some("\x1b[A"),
+            "Down" | "DOWN" => Some("\x1b[B"),
+            "Right" | "RIGHT" => Some("\x1b[C"),
+            "Left" | "LEFT" => Some("\x1b[D"),
+            "C-c" | "Ctrl-C" | "ctrl-c" => Some("\x03"),
+            "C-d" | "Ctrl-D" | "ctrl-d" => Some("\x04"),
+            "C-z" | "Ctrl-Z" | "ctrl-z" => Some("\x1a"),
+            _ => None,
+        };
+
+        if let Some(seq) = mapped_special {
+            out.push_str(seq);
+            prev_was_text = false;
+        } else {
+            if prev_was_text {
+                out.push(' ');
+            }
+            out.push_str(token);
+            prev_was_text = true;
+        }
+    }
+    out
+}
+
 /// Handle programmatic pane automation CLI commands (`turf pane read`, `turf pane send-keys`, `turf pane split`).
 pub async fn handle_pane_cli(subargs: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let subcmd = subargs.first().map(|s| s.as_str()).unwrap_or("read");
     let sock_path = turf_daemon::default_socket_path();
+    if !turf_daemon::probe_daemon(&sock_path).await {
+        eprintln!(
+            "\x1b[1;33mTurfCode daemon is not running\x1b[0m (socket at {}). Start it with: turf daemon start",
+            sock_path.display()
+        );
+        std::process::exit(1);
+    }
     let client = turf_daemon::DaemonClient::connect(&sock_path).await?;
 
     match subcmd {
@@ -942,7 +1049,7 @@ pub async fn handle_pane_cli(subargs: &[String]) -> Result<(), Box<dyn std::erro
             if subargs.len() < 3 {
                 return Err("Missing keys. Usage: turf pane send-keys <pane_id> <keys>".into());
             }
-            let keys = subargs[2..].join(" ");
+            let keys = encode_send_keys_args(&subargs[2..]);
             client.send_pane_keys(pane_id, &keys).await?;
         }
         "split" => {
@@ -1142,5 +1249,17 @@ mod tests {
     async fn test_session_cli_list_when_stopped() {
         let res = handle_session_cli(&["list".to_string()]).await;
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_encode_send_keys_args_tokens() {
+        let args = vec!["echo hello".to_string(), "Enter".to_string()];
+        assert_eq!(encode_send_keys_args(&args), "echo hello\r");
+
+        let multi = vec!["echo".to_string(), "world".to_string(), "Enter".to_string()];
+        assert_eq!(encode_send_keys_args(&multi), "echo world\r");
+
+        let single = vec!["Enter".to_string()];
+        assert_eq!(encode_send_keys_args(&single), "Enter");
     }
 }
