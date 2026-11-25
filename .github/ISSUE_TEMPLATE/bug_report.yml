@@ -1,0 +1,54 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in TurfCode CLI
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the details below so maintainers can reproduce and fix it quickly.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Exact commands, flags, or TUI interactions to trigger the issue.
+      placeholder: |
+        1. Run `turf host .`
+        2. Press `Alt+V`
+        3. See error...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Native Rust CLI / Networking (turf-net)
+        - Spatial TUI Cockpit (turf-tui)
+        - Background Daemon (turf-daemon)
+        - PTY / VTE Engine (turf-pty / turf-vte)
+        - Lock / Worktree / Intent Core (turf-core)
+        - Node.js CLI (bin/ / src/)
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, terminal emulator, Rust/Node versions.
+      placeholder: "Ubuntu 24.04 / Windows Terminal + WSL2 / Rust 1.82 / Node 20"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Terminal Output
+      render: shell

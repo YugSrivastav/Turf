@@ -2,7 +2,26 @@
   "name": "turfcode",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
   "description": "Real-time multiplayer AI coding cockpit in your terminal",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YugSrivastav/turfcode-cli.git"
+  },
+  "homepage": "https://github.com/YugSrivastav/turfcode-cli#readme",
+  "bugs": {
+    "url": "https://github.com/YugSrivastav/turfcode-cli/issues"
+  },
+  "keywords": [
+    "cli",
+    "terminal",
+    "multiplexer",
+    "ai-coding",
+    "pair-programming",
+    "tui",
+    "rust",
+    "nodejs"
+  ],
   "bin": {
     "turf": "./bin/turf.js",
     "turfcode": "./bin/turf.js"

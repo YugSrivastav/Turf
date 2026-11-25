@@ -1,7 +1,7 @@
-# Architectural Micro-Decisions Log (ADR)
+# Architectural Decision Records (ADR)
 
-This file records all agreed micro-decisions and invariant choices for TurfCode CLI.
-All crewmates, contributors, and agents MUST adhere to these invariants when modifying this codebase.
+This document records the architectural decisions and implementation invariants for **TurfCode CLI**.
+All maintainers, contributors, and automated agents MUST adhere to these invariants when modifying this codebase.
 
 ---
 
@@ -80,7 +80,7 @@ All crewmates, contributors, and agents MUST adhere to these invariants when mod
 ## [MD-010] 2026-11-03: Per-User AGY Account & Session ID Isolation
 - **Context:** Managing Antigravity quota and identity when multiple peers prompt agents on the host.
 - **The Fork:** Host pays for all agent tokens vs. per-user credential passthrough and session isolation.
-- **Resolution:** Option B: Per-User Credential Passthrough. Peers connect with their own Antigravity auth/account credentials and distinct session IDs. When Ayush launches an agent, the host executes `agy` scoped to Ayush's account token and session ID, consuming Ayush's quota.
+- **Resolution:** Option B: Per-User Credential Passthrough. Peers connect with their own Antigravity auth/account credentials and distinct session IDs. When a peer launches an agent, the host executes `agy` scoped to that peer's account token and session ID, consuming the peer's own quota.
 - **Worker Invariant:** Subprocess environment variables must dynamically inject the invoking user's auth token and session ID rather than defaulting to host credentials.
 
 ---
@@ -192,7 +192,7 @@ All crewmates, contributors, and agents MUST adhere to these invariants when mod
 ## [MD-024] 2026-11-03: Agent Pause on Peer Disconnect
 - **Context:** Managing agent processes if the sponsoring peer experiences a network drop.
 - **The Fork:** Agent continues unattended vs. agent pauses until peer reconnects.
-- **Resolution:** Option B: Agent Pauses on Disconnect. If Ayush's connection drops, his running agent is sent `SIGSTOP` or placed on hold. When Ayush reconnects, execution resumes, ensuring the peer doesn't lose oversight of agent actions.
+- **Resolution:** Option B: Agent Pauses on Disconnect. If a peer's connection drops, their running agent is sent `SIGSTOP` or placed on hold. When the peer reconnects, execution resumes, ensuring the peer does not lose oversight of agent actions.
 - **Worker Invariant:** Process state must transition to `PAUSED` and broadcast to the Intent Board upon peer heartbeat loss.
 
 ---
@@ -367,7 +367,7 @@ All crewmates, contributors, and agents MUST adhere to these invariants when mod
 ---
 
 ## [MD-044] 2026-11-03: Herdr-Engine UI Alignment & Zero-Leak Terminal Input Prompt
-- **Context:** The Captain noted that TurfCode CLI cockpit still appeared cluttered compared to Herdr's pristine interface, with box borders enclosing the terminal pane and sidebar, and mysterious characters (`¤77CC¥¥77CC...`) automatically streaming into the input box on Windows Terminal.
+- **Context:** Design review noted that the TurfCode CLI cockpit still appeared cluttered compared to Herdr's pristine interface, with box borders enclosing the terminal pane and sidebar, and mysterious characters (`¤77CC¥¥77CC...`) automatically streaming into the input box on Windows Terminal.
 - **The Fork:** Keep Blessed's default boxed widget layout and surface-level keypress filtering vs. Deeply inspect Herdr's actual Rust/Ratatui source code (`/tmp/herdr`), replicate its borderless layout architecture, and permanently eradicate terminal mouse sequence leaks at the protocol level.
 - **Resolution:** Replicate Herdr's exact multiplexer layout architecture and apply triple-lock mouse isolation.
   1. **Herdr Layout Architecture Replication:**
@@ -435,7 +435,7 @@ All crewmates, contributors, and agents MUST adhere to these invariants when mod
 ---
 
 ## [MD-047] 2026-11-03: Herdr-Grade Ratatui Spatial Multiplexer Cockpit: Borderless Panes, Electric Lime Pill Tabs, and 60fps VTE Frame Blitter
-- **Context:** Delivering the pristine, lightning-fast terminal experience demanded by the Captain requires replacing heavy boxed widgets and Node.js wrappers with a native Rust Ratatui cockpit inspired directly by Herdr's spatial layout architecture.
+- **Context:** Delivering a clean, responsive terminal experience requires replacing heavy boxed widgets and Node.js wrappers with a native Rust Ratatui cockpit inspired directly by Herdr's spatial layout architecture.
 - **The Fork:** Keep nested boxed containers and Blessed/Node rendering vs. Implement `crates/turf-tui` in Ratatui 0.29 + Crossterm 0.28 with borderless terminal panes, solid Electric Lime pill tab strips, a full-height single-divider sidebar, and a 60fps flicker-free VTE-to-Ratatui cell blitter.
 - **Resolution:** Implemented `crates/turf-tui` in the Cargo workspace with:
   1. **Herdr Spatial Layout Engine (`CockpitLayout`):**
