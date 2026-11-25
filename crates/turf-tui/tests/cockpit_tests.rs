@@ -561,3 +561,80 @@ fn test_dynamic_pane_badge_and_header_rendering() {
         "Split horizontal divider should render pane badge header"
     );
 }
+
+#[test]
+fn test_utf8_input_state_and_help_overlay_and_dedup_locks() {
+    let mut cockpit = TerminalCockpit::new_headless("TURF-TEST", "HOST", "tester", 30, 100);
+
+    // 1. Multi-byte UTF-8 characters in InputState must never panic
+    cockpit.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+    assert_eq!(cockpit.focus, FocusArea::Input);
+    for ch in ['€', '🚀', 'a'] {
+        cockpit.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    assert_eq!(cockpit.input_state.value, "€🚀a");
+    cockpit.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    cockpit.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(cockpit.input_state.value, "€a");
+    cockpit.handle_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    assert_eq!(cockpit.input_state.value, "€");
+    cockpit.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(cockpit.input_state.value, "");
+
+    // 2. '?' in empty Input opens shortcuts help overlay, Esc closes it
+    assert!(!cockpit.show_help);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    assert!(cockpit.show_help);
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| cockpit.render(f.area(), f.buffer_mut()))
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let mut screen = String::new();
+    for y in 0..30 {
+        for x in 0..100 {
+            screen.push_str(buf.cell((x, y)).unwrap().symbol());
+        }
+    }
+    assert!(screen.contains("Shortcuts & Commands"));
+
+    cockpit.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!cockpit.show_help);
+
+    // 3. Duplicate /lock on the same file must not create duplicate entries
+    cockpit.execute_command("/lock src/main.rs");
+    cockpit.execute_command("/lock src/main.rs");
+    assert_eq!(cockpit.sidebar_state.locks.len(), 1);
+
+    // 4. Alt+O cycles split panes and Alt+X closes active pane
+    cockpit.focus = FocusArea::Terminal;
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT));
+    assert_eq!(cockpit.tabs[0].pane_manager.pane_count(), 2);
+    assert_eq!(cockpit.tabs[0].pane_manager.active_pane_id(), 2);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT));
+    assert_eq!(cockpit.tabs[0].pane_manager.active_pane_id(), 1);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
+    assert_eq!(cockpit.tabs[0].pane_manager.pane_count(), 1);
+
+    // 5. Bare PageUp must NOT scroll TurfCode viewport (forwards to PTY app)
+    for i in 0..40 {
+        cockpit.tabs[0]
+            .pane_manager
+            .active_pane_mut()
+            .unwrap()
+            .terminal
+            .process_str(&format!("line {i}\r\n"));
+    }
+    cockpit.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    assert_eq!(
+        cockpit.tabs[0]
+            .pane_manager
+            .active_pane()
+            .unwrap()
+            .terminal
+            .scroll_offset(),
+        0
+    );
+}

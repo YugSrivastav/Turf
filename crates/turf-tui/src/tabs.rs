@@ -118,11 +118,11 @@ pub fn render_tab_strip(
     let meta_role = role;
     let meta_end = " ";
 
-    let total_meta_len = meta_dot.len()
-        + meta_code.len()
-        + meta_sep.len()
-        + meta_role.len()
-        + meta_end.len();
+    let total_meta_len = meta_dot.chars().count()
+        + meta_code.chars().count()
+        + meta_sep.chars().count()
+        + meta_role.chars().count()
+        + meta_end.chars().count();
 
     if area.width as usize > total_meta_len + 4 {
         let mut right_x = (area.x + area.width) - total_meta_len as u16;

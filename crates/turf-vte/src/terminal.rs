@@ -580,6 +580,36 @@ impl Perform for Terminal {
                 let n = get_param(params, 0, 1).max(1) as usize;
                 self.active_buffer_mut().scroll_down(n);
             }
+            '@' => {
+                // ICH - Insert Blank Characters
+                let n = get_param(params, 0, 1).max(1) as usize;
+                let (x, y) = (self.cursor().x, self.cursor().y);
+                self.active_buffer_mut().insert_chars(x, y, n);
+            }
+            'P' => {
+                // DCH - Delete Characters
+                let n = get_param(params, 0, 1).max(1) as usize;
+                let (x, y) = (self.cursor().x, self.cursor().y);
+                self.active_buffer_mut().delete_chars(x, y, n);
+            }
+            'X' => {
+                // ECH - Erase Characters
+                let n = get_param(params, 0, 1).max(1) as usize;
+                let (x, y) = (self.cursor().x, self.cursor().y);
+                self.active_buffer_mut().erase_chars(x, y, n);
+            }
+            'L' => {
+                // IL - Insert Lines
+                let n = get_param(params, 0, 1).max(1) as usize;
+                let y = self.cursor().y;
+                self.active_buffer_mut().insert_lines(y, n);
+            }
+            'M' => {
+                // DL - Delete Lines
+                let n = get_param(params, 0, 1).max(1) as usize;
+                let y = self.cursor().y;
+                self.active_buffer_mut().delete_lines(y, n);
+            }
             'r' => {
                 // DECSTBM - Set Top and Bottom Margins
                 let top = get_param(params, 0, 1).max(1) as usize - 1;

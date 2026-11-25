@@ -115,10 +115,12 @@ turf daemon start|stop|status    Manage the persistent background daemon
 | `Alt+W` | Close active tab |
 | `Alt+1` .. `Alt+9` | Switch to tab `1..9` |
 | `Alt+V` / `Alt+S` | Split pane vertically / horizontally |
+| `Alt+O` / `Alt+X` | Cycle split panes / Close active pane |
 | `Alt+B` | Toggle Intent Board sidebar |
 | `Alt+Enter` | Toggle bottom command prompt focus |
 | `Alt+Up` / `Alt+Down` | Scroll viewport history up / down |
 | `Shift+PageUp` / `Shift+PageDown` | Page through scrollback history |
+| `Alt+?` / `F1` | Show shortcuts & slash commands overlay |
 | `Alt+D` | Detach from daemon session (keeps processes running) |
 | `Ctrl+Q` / `Alt+Q` | Quit cockpit |
 
@@ -129,6 +131,9 @@ turf daemon start|stop|status    Manage the persistent background daemon
 ```bash
 # Rust workspace tests
 cargo test --workspace
+
+# Real-user interactive PTY E2E suite (requires tmux on Linux/macOS/WSL)
+bash test/e2e-pty.sh
 
 # Node.js tests
 npm test

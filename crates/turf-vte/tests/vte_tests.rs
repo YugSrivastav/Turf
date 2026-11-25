@@ -386,3 +386,29 @@ fn test_alternate_screen_buffer_bypasses_scrollback_history() {
     assert_eq!(term.scrollback_len(), primary_scrollback_before);
 }
 
+#[test]
+fn test_csi_ich_dch_ech_il_dl_editing_sequences() {
+    let mut term = Terminal::new(4, 10);
+    term.process_str("ABCDEF");
+    // Move back 4 cols to 'C' (index 2), delete 2 chars (DCH \x1b[2P) -> "ABEF"
+    term.process_str("\x1b[4D\x1b[2P");
+    assert_eq!(term.row_text_trimmed(0), "ABEF");
+
+    // Insert 2 blank chars at 'E' (ICH \x1b[2@) -> "AB  EF"
+    term.process_str("\x1b[2@");
+    assert_eq!(term.row_text_trimmed(0), "AB  EF");
+
+    // Erase 2 chars at cursor (ECH \x1b[2X) -> "AB  EF" -> move to col 4 and erase -> "AB"
+    term.process_str("\x1b[5G\x1b[2X");
+    assert_eq!(term.row_text_trimmed(0), "AB");
+
+    // Insert line (IL \x1b[1L) at row 0 pushes "AB" down to row 1
+    term.process_str("\x1b[1;1H\x1b[1L");
+    assert_eq!(term.row_text_trimmed(0), "");
+    assert_eq!(term.row_text_trimmed(1), "AB");
+
+    // Delete line (DL \x1b[1M) at row 0 pulls "AB" back to row 0
+    term.process_str("\x1b[1M");
+    assert_eq!(term.row_text_trimmed(0), "AB");
+}
+

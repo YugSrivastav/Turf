@@ -113,7 +113,8 @@ pub fn blit_screen_buffer(
 
             // Render clean cursor using reverse video without neon green artifacts
             if let Some((cx, cy)) = cursor {
-                if !is_scrolled_back && cx == x && cy == y && is_focused {
+                let clamped_cx = cx.min(cols.saturating_sub(1));
+                if !is_scrolled_back && clamped_cx == x && cy == y && is_focused {
                     modifier |= Modifier::REVERSED;
                     if c == ' ' && (fg == RatColor::Reset || fg == bg) {
                         fg = COLOR_TEXT_PRIMARY;

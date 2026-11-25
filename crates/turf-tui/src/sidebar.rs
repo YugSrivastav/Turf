@@ -6,8 +6,9 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use turf_protocol::intent::TaskCard;
+use turf_protocol::intent::{TaskCard, TaskStatus};
 use turf_protocol::locks::FileLock;
+use unicode_width::UnicodeWidthChar;
 
 use crate::layout::SidebarSectionLayout;
 use crate::theme::{
@@ -87,56 +88,75 @@ pub fn render_sidebar(
         }
     };
 
-    // Helper to write text at (x, y) with truncation and bounds check
+    // Helper to write text at (x, y) with unicode-width awareness and bounds check
     let write_line = |x: u16, y: u16, max_w: u16, text: &str, style: Style, b: &mut Buffer| {
         if y >= b.area().height {
             return;
         }
-        let chars: Vec<char> = text.chars().collect();
-        for (i, &ch) in chars.iter().take(max_w as usize).enumerate() {
-            let px = x + i as u16;
-            if px < b.area().width {
-                let cell = &mut b[(px, y)];
-                cell.set_char(ch);
-                cell.set_style(style);
-                cell.set_bg(COLOR_BG);
+        let mut col: u16 = 0;
+        for ch in text.chars() {
+            let cw = ch.width().unwrap_or(1) as u16;
+            if cw == 0 {
+                continue;
             }
+            if col + cw > max_w || x + col >= b.area().width {
+                break;
+            }
+            let px = x + col;
+            let cell = &mut b[(px, y)];
+            cell.set_char(ch);
+            cell.set_style(style);
+            cell.set_bg(COLOR_BG);
+            if cw == 2 && px + 1 < b.area().width {
+                b[(px + 1, y)].set_skip(true);
+            }
+            col += cw;
         }
         // Fill remainder with blank space
-        for i in chars.len()..(max_w as usize) {
-            let px = x + i as u16;
-            if px < b.area().width {
-                let cell = &mut b[(px, y)];
-                cell.set_char(' ');
-                cell.set_style(Style::default());
-                cell.set_bg(COLOR_BG);
-            }
+        while col < max_w && x + col < b.area().width {
+            let px = x + col;
+            let cell = &mut b[(px, y)];
+            cell.set_skip(false);
+            cell.set_char(' ');
+            cell.set_style(Style::default());
+            cell.set_bg(COLOR_BG);
+            col += 1;
         }
     };
 
-    // Helper to write styled spans in a single line
+    // Helper to write styled spans in a single line with unicode-width awareness
     let write_spans = |x: u16, y: u16, max_w: u16, spans: &[(&str, Style)], b: &mut Buffer| {
         if y >= b.area().height {
             return;
         }
-        let mut curr_x = x;
+        let mut col: u16 = 0;
         for &(text, style) in spans {
             for ch in text.chars() {
-                if curr_x >= x + max_w || curr_x >= b.area().width {
+                let cw = ch.width().unwrap_or(1) as u16;
+                if cw == 0 {
+                    continue;
+                }
+                if col + cw > max_w || x + col >= b.area().width {
                     break;
                 }
-                let cell = &mut b[(curr_x, y)];
+                let px = x + col;
+                let cell = &mut b[(px, y)];
                 cell.set_char(ch);
                 cell.set_style(style);
-                curr_x += 1;
+                if cw == 2 && px + 1 < b.area().width {
+                    b[(px + 1, y)].set_skip(true);
+                }
+                col += cw;
             }
         }
-        while curr_x < x + max_w && curr_x < b.area().width {
-            let cell = &mut b[(curr_x, y)];
+        while col < max_w && x + col < b.area().width {
+            let px = x + col;
+            let cell = &mut b[(px, y)];
+            cell.set_skip(false);
             cell.set_char(' ');
             cell.set_style(Style::default());
             cell.set_bg(COLOR_BG);
-            curr_x += 1;
+            col += 1;
         }
     };
 
@@ -145,14 +165,29 @@ pub fn render_sidebar(
     if s.height > 0 {
         write_line(s.x + 1, s.y, s.width.saturating_sub(2), "spaces", Theme::sidebar_header(), buf);
         if s.height > 1 {
+            let max_w = s.width.saturating_sub(2) as usize;
             let branch_str = format!("({})", state.current_branch);
+            let reserved = 2 + 1 + branch_str.chars().count(); // "○ " + " " + "(branch)"
+            let space_display: String = if max_w > reserved + 2 {
+                let budget = max_w - reserved;
+                let sc: Vec<char> = state.current_space.chars().collect();
+                if sc.len() > budget {
+                    let mut truncated: String = sc[..budget.saturating_sub(1)].iter().collect();
+                    truncated.push('…');
+                    truncated
+                } else {
+                    state.current_space.clone()
+                }
+            } else {
+                state.current_space.clone()
+            };
             write_spans(
                 s.x + 1,
                 s.y + 1,
                 s.width.saturating_sub(2),
                 &[
                     ("○ ", Style::default().fg(COLOR_TEXT_MUTED).bg(COLOR_BG)),
-                    (&state.current_space, Style::default().fg(COLOR_TEXT_PRIMARY).bg(COLOR_BG)),
+                    (&space_display, Style::default().fg(COLOR_TEXT_PRIMARY).bg(COLOR_BG)),
                     (" ", Style::default().fg(COLOR_TEXT_DIM).bg(COLOR_BG)),
                     (&branch_str, Style::default().fg(COLOR_CYAN).bg(COLOR_BG)),
                 ],
@@ -209,8 +244,14 @@ pub fn render_sidebar(
                     "  "
                 };
 
-                let badge = format!("[{}]", task.status.display_badge());
-                let line_str = format!("{}{:<11} {}", marker, badge, task.title);
+                let short_badge = match task.status {
+                    TaskStatus::Queued => "TODO",
+                    TaskStatus::InProgress => "WIP",
+                    TaskStatus::Done => "DONE",
+                    TaskStatus::Blocked => "BLK",
+                };
+                let badge = format!("[{short_badge}]");
+                let line_str = format!("{}{} {}", marker, badge, task.title);
                 let item_style = if is_focused && idx == state.selected_task_index {
                     Style::default().fg(COLOR_TEXT_PRIMARY).bg(COLOR_ACTIVE_PILL)
                 } else {

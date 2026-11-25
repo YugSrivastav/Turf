@@ -261,11 +261,18 @@ impl TurfDaemonServer {
             }
         });
 
+        let mut attached_session: Option<String> = None;
+
         // Main request handling loop
         while let Ok(msg) = recv_ipc_message(&mut read_half).await {
             match msg {
                 IpcMessage::Request { id, request } => {
-                    let response = self.handle_request(request).await;
+                    if let DaemonRequest::AttachSession { id: ref sess_id } = request {
+                        attached_session = Some(sess_id.clone());
+                    }
+                    let response = self
+                        .handle_request_with_session(request, attached_session.as_deref())
+                        .await;
                     if client_out_tx
                         .send(IpcMessage::Response { id, response })
                         .await
@@ -291,6 +298,15 @@ impl TurfDaemonServer {
 
     /// Dispatch and execute an RPC request from a client.
     pub async fn handle_request(&self, request: DaemonRequest) -> DaemonResponse {
+        self.handle_request_with_session(request, None).await
+    }
+
+    /// Dispatch and execute an RPC request scoped to an optional attached session.
+    pub async fn handle_request_with_session(
+        &self,
+        request: DaemonRequest,
+        attached_session: Option<&str>,
+    ) -> DaemonResponse {
         match request {
             DaemonRequest::Status => {
                 let uptime_secs = self.state.start_time.elapsed().as_secs();
@@ -320,11 +336,21 @@ impl TurfDaemonServer {
                     pane_ids: Vec::new(),
                 });
                 let panes = self.state.panes.lock().await;
-                session.pane_ids.retain(|pid| panes.contains_key(pid));
-                if session.pane_ids.is_empty() && !panes.is_empty() {
-                    let mut all_pids: Vec<usize> = panes.keys().copied().collect();
-                    all_pids.sort_unstable();
-                    session.pane_ids = all_pids;
+                session.pane_ids.retain(|pid| {
+                    panes
+                        .get(pid)
+                        .is_some_and(|p| p.session_name == id)
+                });
+                let mut session_panes: Vec<usize> = panes
+                    .values()
+                    .filter(|p| p.session_name == id)
+                    .map(|p| p.id)
+                    .collect();
+                session_panes.sort_unstable();
+                for pid in session_panes {
+                    if !session.pane_ids.contains(&pid) {
+                        session.pane_ids.push(pid);
+                    }
                 }
                 let active_panes = session.pane_ids.clone();
                 DaemonResponse::SessionAttached {
@@ -453,7 +479,10 @@ impl TurfDaemonServer {
                 tab_id,
                 cwd,
                 command,
-            } => match self.spawn_pane_internal(None, tab_id, cwd, command).await {
+            } => match self
+                .spawn_pane_internal(attached_session.map(str::to_string), tab_id, cwd, command)
+                .await
+            {
                 Ok(pane_id) => DaemonResponse::PaneSpawned { pane_id },
                 Err(e) => DaemonResponse::Error {
                     message: format!("Failed to spawn pane: {e}"),

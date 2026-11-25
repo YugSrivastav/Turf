@@ -8,6 +8,7 @@
 //! - 60fps flicker-free frame blitting event loop
 
 use std::io::{self, stdout, Write};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -17,6 +18,7 @@ use crossterm::terminal::{
 use ratatui::backend::Backend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::Terminal as RatTerminal;
 use tokio::sync::broadcast;
 use turf_daemon::DaemonClient;
@@ -30,6 +32,9 @@ use crate::layout::CockpitLayout;
 use crate::pane::{Pane, PaneBackend, PaneManager, SplitDirection};
 use crate::sidebar::{render_sidebar, SidebarState};
 use crate::tabs::{render_tab_strip, TabItem};
+use crate::theme::{
+    COLOR_ACCENT, COLOR_ACTIVE_PILL, COLOR_HEADER_BG, COLOR_TEXT_MUTED, COLOR_TEXT_PRIMARY,
+};
 
 /// Focus areas for spatial navigation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +56,8 @@ pub struct TerminalCockpit {
     pub session_code: String,
     pub role: String,
     pub username: String,
+    pub cwd: Option<String>,
+    pub show_help: bool,
     pub sidebar_visible: bool,
     pub sidebar_state: SidebarState,
     pub tabs: Vec<Tab>,
@@ -84,6 +91,8 @@ impl TerminalCockpit {
             session_code: session_code.into(),
             role: role.into(),
             username: username.into(),
+            cwd: None,
+            show_help: false,
             sidebar_visible: true,
             sidebar_state: SidebarState::default(),
             tabs: vec![tab],
@@ -117,6 +126,8 @@ impl TerminalCockpit {
             session_code: session_code.into(),
             role: role.into(),
             username: username.into(),
+            cwd: None,
+            show_help: false,
             sidebar_visible: true,
             sidebar_state: SidebarState::default(),
             tabs: vec![tab],
@@ -151,7 +162,22 @@ impl TerminalCockpit {
         rows: u16,
         cols: u16,
     ) -> anyhow::Result<Self> {
+        Self::new_daemon_with_cwd(client, session_code, role, username, rows, cols, None).await
+    }
+
+    /// Initialize a new thin-client TerminalCockpit connected to the background daemon
+    /// with an optional working directory for newly spawned panes.
+    pub async fn new_daemon_with_cwd(
+        client: DaemonClient,
+        session_code: impl Into<String>,
+        role: impl Into<String>,
+        username: impl Into<String>,
+        rows: u16,
+        cols: u16,
+        cwd: Option<&Path>,
+    ) -> anyhow::Result<Self> {
         let session_code_str = session_code.into();
+        let cwd_str = cwd.map(|p| p.to_string_lossy().to_string());
         let existing_panes = client.attach_session(&session_code_str).await.unwrap_or_default();
         let event_rx = client.subscribe();
 
@@ -178,7 +204,7 @@ impl TerminalCockpit {
                 initial_panes.push(p);
             }
         } else {
-            let daemon_pane_id = client.spawn_pane(1, None, None).await?;
+            let daemon_pane_id = client.spawn_pane(1, cwd_str.clone(), None).await?;
             let p = Pane::new_daemon(
                 1,
                 "Shell 1",
@@ -210,6 +236,8 @@ impl TerminalCockpit {
             session_code: session_code_str,
             role: role.into(),
             username: username.into(),
+            cwd: cwd_str,
+            show_help: false,
             sidebar_visible: true,
             sidebar_state: SidebarState::default(),
             tabs: vec![tab],
@@ -319,7 +347,18 @@ impl TerminalCockpit {
         if self.tabs.len() <= 1 {
             return false;
         }
-        self.tabs.remove(self.active_tab_index);
+        let removed_tab = self.tabs.remove(self.active_tab_index);
+        for pane in removed_tab.pane_manager.all_panes() {
+            if let PaneBackend::Daemon { pane_id, client } = &pane.backend {
+                let pid = *pane_id as usize;
+                let client = client.clone();
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        let _ = client.close_pane(pid).await;
+                    });
+                }
+            }
+        }
         if self.active_tab_index >= self.tabs.len() {
             self.active_tab_index = self.tabs.len() - 1;
         }
@@ -454,9 +493,10 @@ impl TerminalCockpit {
 
             let pid_opt = if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let client_c = client.clone();
+                let cwd_c = self.cwd.clone();
                 tokio::task::block_in_place(|| {
                     handle.block_on(async {
-                        client_c.spawn_pane(tab_id, None, None).await.ok()
+                        client_c.spawn_pane(tab_id, cwd_c, None).await.ok()
                     })
                 })
             } else {
@@ -553,8 +593,12 @@ impl TerminalCockpit {
                 self.split_active_pane_auto(SplitDirection::Horizontal);
                 self.focus = FocusArea::Terminal;
             }
-            "/close" => {
+            "/close" | "/pane-close" => {
                 self.close_active_pane();
+                self.focus = FocusArea::Terminal;
+            }
+            "/next" | "/pane-next" => {
+                self.cycle_pane_focus();
                 self.focus = FocusArea::Terminal;
             }
             "/tab" | "/new" => {
@@ -582,14 +626,21 @@ impl TerminalCockpit {
             "/lock" => {
                 if parts.len() > 1 {
                     let file_path = parts[1];
-                    let lock = FileLock::new(
-                        file_path,
-                        &self.username,
-                        "task-1",
-                        30_000,
-                        None,
-                    );
-                    self.sidebar_state.locks.push(lock);
+                    if !self
+                        .sidebar_state
+                        .locks
+                        .iter()
+                        .any(|l| l.file_path == file_path)
+                    {
+                        let lock = FileLock::new(
+                            file_path,
+                            &self.username,
+                            "task-1",
+                            30_000,
+                            None,
+                        );
+                        self.sidebar_state.locks.push(lock);
+                    }
                 }
             }
             "/unlock" => {
@@ -604,17 +655,48 @@ impl TerminalCockpit {
             "/detach" => {
                 self.detach();
             }
+            "/help" | "/?" => {
+                self.show_help = true;
+            }
             _ => {}
         }
     }
 
     /// Process a Crossterm keyboard event.
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // --- 0. Help overlay dismissal ---
+        if self.show_help {
+            if matches!(
+                key.code,
+                KeyCode::Esc
+                    | KeyCode::Enter
+                    | KeyCode::F(1)
+                    | KeyCode::Char('?')
+                    | KeyCode::Char('q')
+                    | KeyCode::Char('Q')
+            ) {
+                self.show_help = false;
+                return true;
+            }
+            return true;
+        }
+
         // --- 1. Exit shortcut (Ctrl+Q or Alt+Q) ---
         if (key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT))
             && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q'))
         {
             self.should_exit = true;
+            return true;
+        }
+
+        // --- 1b. Help overlay toggle (F1, Alt+?, or ? in Input/Sidebar) ---
+        if key.code == KeyCode::F(1)
+            || (key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('?'))
+            || (key.code == KeyCode::Char('?')
+                && (self.focus == FocusArea::Sidebar
+                    || (self.focus == FocusArea::Input && self.input_state.value.is_empty())))
+        {
+            self.show_help = true;
             return true;
         }
 
@@ -639,12 +721,11 @@ impl TerminalCockpit {
         // --- 3. Viewport Scrolling Hotkeys ---
         // Shift+PageUp, Alt+Up, or Alt+[: scroll up by 10 lines
         // Shift+PageDown or Alt+Down: scroll down toward live stream
+        // Note: bare PageUp/PageDown pass directly through to vim/less/htop inside the PTY.
         let is_scroll_up = (key.modifiers.contains(KeyModifiers::ALT) && (key.code == KeyCode::Up || key.code == KeyCode::Char('[')))
-            || (key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageUp)
-            || (key.code == KeyCode::PageUp && key.modifiers.is_empty());
+            || (key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageUp);
         let is_scroll_down = (key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Down)
-            || (key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageDown)
-            || (key.code == KeyCode::PageDown && key.modifiers.is_empty());
+            || (key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageDown);
 
         if is_scroll_up {
             if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
@@ -685,6 +766,14 @@ impl TerminalCockpit {
                 }
                 KeyCode::Char('s') | KeyCode::Char('S') => {
                     self.split_active_pane_auto(SplitDirection::Horizontal);
+                    return true;
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    self.cycle_pane_focus();
+                    return true;
+                }
+                KeyCode::Char('x') | KeyCode::Char('X') => {
+                    self.close_active_pane();
                     return true;
                 }
                 KeyCode::Char(c @ '1'..='9') => {
@@ -890,6 +979,97 @@ impl TerminalCockpit {
             is_input_focused,
             buf,
         );
+
+        // 5. Render Shortcuts Help Overlay if toggled
+        if self.show_help {
+            self.render_help_overlay(area, buf);
+        }
+    }
+
+    fn render_help_overlay(&self, area: Rect, buf: &mut Buffer) {
+        let lines = [
+            " TurfCode Cockpit — Shortcuts & Commands ",
+            "",
+            " Alt+T / Alt+W      New tab / Close tab",
+            " Alt+1..9           Switch active tab",
+            " Alt+V / Alt+S      Vertical / Horizontal split",
+            " Alt+O / Alt+X      Cycle split pane / Close pane",
+            " Alt+B              Toggle Intent Board sidebar",
+            " Alt+Enter          Toggle prompt focus (Tab cycles)",
+            " Alt+Up / Alt+Down  Scroll history (Esc snaps back)",
+            " Alt+D / Ctrl+Q     Detach daemon / Quit cockpit",
+            "",
+            " Prompt: /task <title>  /lock <file>  /unlock <file>",
+            "         /split  /split-h  /next  /close  /tab  /quit",
+            "",
+            " Press Esc or ? to close ",
+        ];
+
+        let box_w = 56u16.min(area.width.saturating_sub(2));
+        let box_h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+        if box_w < 20 || box_h < 6 {
+            return;
+        }
+        let start_x = area.x + (area.width - box_w) / 2;
+        let start_y = area.y + (area.height - box_h) / 2;
+
+        let bg_style = Style::default().bg(COLOR_HEADER_BG).fg(COLOR_TEXT_PRIMARY);
+        let border_style = Style::default().bg(COLOR_HEADER_BG).fg(COLOR_ACCENT);
+
+        for dy in 0..box_h {
+            for dx in 0..box_w {
+                let x = start_x + dx;
+                let y = start_y + dy;
+                let cell = &mut buf[(x, y)];
+                let is_top = dy == 0;
+                let is_bot = dy == box_h - 1;
+                let is_left = dx == 0;
+                let is_right = dx == box_w - 1;
+                let ch = if is_top && is_left {
+                    '┌'
+                } else if is_top && is_right {
+                    '┐'
+                } else if is_bot && is_left {
+                    '└'
+                } else if is_bot && is_right {
+                    '┘'
+                } else if is_top || is_bot {
+                    '─'
+                } else if is_left || is_right {
+                    '│'
+                } else {
+                    ' '
+                };
+                cell.set_char(ch);
+                cell.set_style(if is_top || is_bot || is_left || is_right {
+                    border_style
+                } else {
+                    bg_style
+                });
+            }
+        }
+
+        for (i, line) in lines.iter().enumerate() {
+            if (i as u16) + 2 >= box_h {
+                break;
+            }
+            let y = start_y + 1 + i as u16;
+            let style = if i == 0 {
+                Style::default()
+                    .bg(COLOR_ACTIVE_PILL)
+                    .fg(COLOR_ACCENT)
+                    .add_modifier(Modifier::BOLD)
+            } else if i == lines.len() - 1 {
+                Style::default().bg(COLOR_HEADER_BG).fg(COLOR_TEXT_MUTED)
+            } else {
+                bg_style
+            };
+            for (cx, ch) in line.chars().take((box_w - 2) as usize).enumerate() {
+                let cell = &mut buf[(start_x + 1 + cx as u16, y)];
+                cell.set_char(ch);
+                cell.set_style(style);
+            }
+        }
     }
 
     /// Main 60fps frame blitting and event loop with a per-frame tick callback.
@@ -941,13 +1121,8 @@ impl TerminalCockpit {
                     Event::Key(key) => {
                         self.handle_key(key);
                     }
-                    Event::Resize(cols, rows) => {
-                        // Resize active pane
-                        if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
-                            if let Some(pane) = tab.pane_manager.active_pane_mut() {
-                                pane.resize(Rect::new(0, 0, cols, rows));
-                            }
-                        }
+                    Event::Resize(_, _) => {
+                        // Panes are resized on the next draw pass to their exact layout rects.
                     }
                     _ => {}
                 }

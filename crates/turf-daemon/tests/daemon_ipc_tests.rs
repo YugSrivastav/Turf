@@ -505,3 +505,66 @@ async fn test_periodic_foreground_process_sampling_and_status_changed_event() {
     server.shutdown();
     let _ = server_task.await;
 }
+
+#[tokio::test]
+async fn test_attach_session_isolates_panes_across_named_sessions() {
+    let dir = tempdir().expect("Failed to create tempdir");
+    let sock_path = dir.path().join("isolation.sock");
+
+    let server = TurfDaemonServer::new(&sock_path);
+    let server_task = tokio::spawn({
+        let server = server.clone();
+        async move { server.run().await }
+    });
+
+    for _ in 0..50 {
+        if sock_path.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let client = DaemonClient::connect(&sock_path)
+        .await
+        .expect("Failed to connect client");
+
+    // Create named session "alpha" with its own pane
+    let alpha = client
+        .create_session("alpha")
+        .await
+        .expect("create_session alpha failed");
+    assert_eq!(alpha.pane_count, 1);
+
+    // Attaching to a brand-new session "beta" must NOT steal alpha's panes
+    let beta_panes = client
+        .attach_session("beta")
+        .await
+        .expect("attach_session beta failed");
+    assert!(
+        beta_panes.is_empty(),
+        "New session 'beta' must not steal panes from 'alpha': {:?}",
+        beta_panes
+    );
+
+    // Spawning a pane while attached to "beta" must belong to "beta", not "default"
+    let beta_pane_id = client
+        .spawn_pane(1, None, None)
+        .await
+        .expect("spawn_pane in beta failed");
+
+    let beta_reattach = client
+        .attach_session("beta")
+        .await
+        .expect("reattach beta failed");
+    assert_eq!(beta_reattach, vec![beta_pane_id]);
+
+    let alpha_panes = client
+        .attach_session("alpha")
+        .await
+        .expect("attach alpha failed");
+    assert_eq!(alpha_panes.len(), 1);
+    assert_ne!(alpha_panes[0], beta_pane_id);
+
+    server.shutdown();
+    let _ = server_task.await;
+}
