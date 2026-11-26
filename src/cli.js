@@ -82,11 +82,10 @@ export function parseArgs(rawArgs) {
 
 export function printHelp() {
   console.log(`
-${CHALK.limeBold('TURFCODE CLI')} — ${CHALK.text('Real-time multiplayer AI coding in the terminal')}
+${CHALK.limeBold('TURF')} — ${CHALK.text('Real-time multiplayer AI coding workspace in the terminal')}
 
 ${CHALK.dim('USAGE:')}
-  ${CHALK.lime('turfcode')}                 ${CHALK.text('Open interactive launcher menu (Create or Join a Turf)')}
-  ${CHALK.lime('turf')}                     ${CHALK.text('Alias for turfcode')}
+  ${CHALK.lime('turf')}                     ${CHALK.text('Open interactive launcher menu (Create or Join a Turf)')}
   ${CHALK.lime('turf host [dir]')}          ${CHALK.text('Host a shared Turf session in the given directory (default: .)')}
   ${CHALK.lime('turf join <id>')}           ${CHALK.text('Join an active Turf session using a 6-character room code')}
   ${CHALK.lime('turf --silent, -s')}        ${CHALK.text('Run in silent mode (mute ANSI \\x07 audio bell)')}
@@ -105,14 +104,14 @@ ${CHALK.dim('NAVIGATION KEYBINDINGS:')}
 
 export function printSplash() {
   console.log(CHALK.lime(`
-  ╔═════════════════════════════════════════════════════════════════════════╗
-  ║   ████████╗██╗   ██╗██████╗ ███████╗ ██████╗ ██████╗ ██████╗ ███████╗   ║
-  ║   ╚══██╔══╝██║   ██║██╔══██╗██╔════╝██╔════╝██╔═══██╗██╔══██╗██╔════╝   ║
-  ║      ██║   ██║   ██║██████╔╝█████╗  ██║     ██║   ██║██║  ██║█████╗     ║
-  ║      ██║   ██║   ██║██╔══██╗██╔══╝  ██║     ██║   ██║██║  ██║██╔══╝     ║
-  ║      ██║   ╚██████╔╝██║  ██║██║     ╚██████╗╚██████╔╝██████╔╝███████╗   ║
-  ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝   ║
-  ╚═════════════════════════════════════════════════════════════════════════╝
+  ╔═════════════════════════════════════════╗
+  ║   ████████╗██╗   ██╗██████╗ ███████╗    ║
+  ║   ╚══██╔══╝██║   ██║██╔══██╗██╔════╝    ║
+  ║      ██║   ██║   ██║██████╔╝█████╗      ║
+  ║      ██║   ██║   ██║██╔══██╗██╔══╝      ║
+  ║      ██║   ╚██████╔╝██║  ██║██║         ║
+  ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝         ║
+  ╚═════════════════════════════════════════╝
 `));
 }
 
@@ -187,7 +186,7 @@ export async function runCLI(argv = process.argv) {
     }
     const selection = await promptInteractiveMenu();
     if (!selection) {
-      console.log(CHALK.dim('\nExited TurfCode.\n'));
+      console.log(CHALK.dim('\nExited Turf.\n'));
       return 0;
     }
     command = selection.command;

@@ -28,10 +28,7 @@ pub async fn ensure_daemon_running() -> anyhow::Result<PathBuf> {
     let socket_path = default_socket_path();
 
     if probe_daemon(&socket_path).await {
-        tracing::debug!(
-            "TurfCode daemon is already running at {}",
-            socket_path.display()
-        );
+        tracing::debug!("Turf daemon is already running at {}", socket_path.display());
         return Ok(socket_path);
     }
 

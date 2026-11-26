@@ -1,12 +1,12 @@
 name: Feature Request
-description: Suggest an improvement or new capability for TurfCode CLI
+description: Suggest an improvement or new capability for Turf
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Have an idea for TurfCode CLI? Share the use case and proposed design below.
+        Have an idea for Turf? Share the use case and proposed design below.
   - type: textarea
     id: problem
     attributes:

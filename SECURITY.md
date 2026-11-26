@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-TurfCode CLI is in active pre-1.0 development (`0.1.x`). Security fixes are applied to `main` and shipped in subsequent builds.
+Turf is in active pre-1.0 development (`0.1.x`). Security fixes are applied to `main` and shipped in subsequent builds.
 
 | Version | Supported |
 | :--- | :--- |
@@ -13,7 +13,7 @@ TurfCode CLI is in active pre-1.0 development (`0.1.x`). Security fixes are appl
 If you find a vulnerability—such as credential leaks, tunnel encryption flaws in [turf-net](./crates/turf-net), shell/command injection in [turf-pty](./crates/turf-pty), or path traversal outside the hosted directory in [turf-core](./crates/turf-core):
 
 1. Do not open a public GitHub issue.
-2. Submit a private report through [GitHub Security Advisories](https://github.com/YugSrivastav/turfcode-cli/security/advisories/new) (preferred) or email `yug.srivastav99@gmail.com` with a clear description, reproduction steps, and affected crates or files.
+2. Submit a private report through [GitHub Security Advisories](https://github.com/YugSrivastav/Turf/security/advisories/new) (preferred) or email `yug.srivastav99@gmail.com` with a clear description, reproduction steps, and affected crates or files.
 3. Expect an initial response within 72 hours, followed by coordinated remediation and disclosure once a fix lands on `main`.
 
 ## Core Security Boundaries

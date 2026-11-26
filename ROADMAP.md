@@ -1,6 +1,6 @@
 # Product Vision & Roadmap
 
-TurfCode CLI is building a multiplayer, AI-native terminal cockpit: a single binary where developers host a repository, pair with teammates or AI coding agents over encrypted tunnels, run shells and external CLIs side by side in persistent split panes, and coordinate edits safely using atomic locks and isolated git worktrees.
+Turf is building a multiplayer, AI-native terminal cockpit: a single binary where developers host a repository, pair with teammates or AI coding agents over encrypted tunnels, run shells and external CLIs side by side in persistent split panes, and coordinate edits safely using atomic locks and isolated git worktrees.
 
 ## Working Today
 

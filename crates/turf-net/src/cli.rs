@@ -13,22 +13,22 @@ use turf_tui::{PeerInfo, TerminalCockpit};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Build the ASCII splash banner string for TurfCode CLI.
+/// Build the ASCII splash banner string for Turf.
 pub fn format_splash() -> String {
     "\x1b[1;32m
-  ╔═════════════════════════════════════════════════════════════════════════╗
-  ║   ████████╗██╗   ██╗██████╗ ███████╗ ██████╗ ██████╗ ██████╗ ███████╗   ║
-  ║   ╚══██╔══╝██║   ██║██╔══██╗██╔════╝██╔════╝██╔═══██╗██╔══██╗██╔════╝   ║
-  ║      ██║   ██║   ██║██████╔╝█████╗  ██║     ██║   ██║██║  ██║█████╗     ║
-  ║      ██║   ██║   ██║██╔══██╗██╔══╝  ██║     ██║   ██║██║  ██║██╔══╝     ║
-  ║      ██║   ╚██████╔╝██║  ██║██║     ╚██████╗╚██████╔╝██████╔╝███████╗   ║
-  ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝   ║
-  ╚═════════════════════════════════════════════════════════════════════════╝
+  ╔═════════════════════════════════════════╗
+  ║   ████████╗██╗   ██╗██████╗ ███████╗    ║
+  ║   ╚══██╔══╝██║   ██║██╔══██╗██╔════╝    ║
+  ║      ██║   ██║   ██║██████╔╝█████╗      ║
+  ║      ██║   ██║   ██║██╔══██╗██╔══╝      ║
+  ║      ██║   ╚██████╔╝██║  ██║██║         ║
+  ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝         ║
+  ╚═════════════════════════════════════════╝
 \x1b[0m"
         .to_string()
 }
 
-/// Banner and splash printing for TurfCode CLI.
+/// Banner and splash printing for Turf.
 pub fn print_splash() {
     println!("{}", format_splash());
 }
@@ -36,11 +36,10 @@ pub fn print_splash() {
 /// Print CLI help information.
 pub fn print_help() {
     println!(
-        "\x1b[1;32mTURFCODE CLI\x1b[0m — \x1b[37mReal-time multiplayer AI coding in the terminal\x1b[0m
+        "\x1b[1;32mTURF\x1b[0m — \x1b[37mMultiplayer AI coding workspace & terminal multiplexer\x1b[0m
 
 \x1b[2mUSAGE:\x1b[0m
-  \x1b[32mturfcode\x1b[0m                          Open interactive launcher menu (Create or Join a Turf)
-  \x1b[32mturf\x1b[0m                              Alias for turfcode
+  \x1b[32mturf\x1b[0m                              Open interactive launcher menu (Create, Join, or Attach)
   \x1b[32mturf host [dir] [--open-folder]\x1b[0m   Host a shared Turf session in the given directory (default: .)
   \x1b[32mturf join <id> [url]\x1b[0m              Join an active Turf session using room code
   \x1b[32mturf list\x1b[0m                         List active daemon sessions
@@ -419,7 +418,7 @@ pub async fn run_host(target_dir: &Path, port: u16) -> Result<(), NetError> {
         let space_name = target_dir
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("turfcode")
+            .unwrap_or("turf")
             .to_string();
         cockpit.sidebar_state.current_space = space_name;
         if let Some(branch) = detect_git_branch(target_dir) {
@@ -479,7 +478,7 @@ pub async fn run_host(target_dir: &Path, port: u16) -> Result<(), NetError> {
             }
         })?;
 
-        println!("\n  Shutting down TurfCode session...");
+        println!("\n  Shutting down Turf session...");
         server.stop().await;
         return Ok(());
     }
@@ -526,7 +525,7 @@ pub async fn run_host(target_dir: &Path, port: u16) -> Result<(), NetError> {
 
     // Wait for Ctrl+C to terminate
     tokio::signal::ctrl_c().await.ok();
-    println!("\n  Shutting down TurfCode session...");
+    println!("\n  Shutting down Turf session...");
     server.stop().await;
     Ok(())
 }
@@ -770,7 +769,7 @@ pub async fn run_attach(session_code: &str) -> Result<(), NetError> {
             );
             println!("  \x1b[2mTo re-attach, run: turf attach {}\x1b[0m\n", clean_code);
         } else {
-            println!("\n  Exited TurfCode session {}.", clean_code);
+            println!("\n  Exited Turf session {}.", clean_code);
         }
     } else {
         println!("Headless mode: session {} active in daemon.", clean_code);
@@ -865,20 +864,20 @@ pub async fn handle_daemon_cli(subargs: &[String]) -> Result<(), Box<dyn std::er
             let socket_path = turf_daemon::default_socket_path();
             if foreground {
                 println!(
-                    "Starting TurfCode daemon in foreground on {}...",
+                    "Starting Turf daemon in foreground on {}...",
                     socket_path.display()
                 );
                 let server = turf_daemon::TurfDaemonServer::new(socket_path);
                 server.run().await?;
             } else if turf_daemon::probe_daemon(&socket_path).await {
                 println!(
-                    "\x1b[1;33mTurfCode daemon is already running\x1b[0m at {}",
+                    "\x1b[1;33mTurf daemon is already running\x1b[0m at {}",
                     socket_path.display()
                 );
             } else {
                 turf_daemon::ensure_daemon_running().await?;
                 println!(
-                    "\x1b[1;32m✔ TurfCode daemon started successfully\x1b[0m at {}",
+                    "\x1b[1;32m✔ Turf daemon started successfully\x1b[0m at {}",
                     socket_path.display()
                 );
             }
@@ -907,11 +906,11 @@ pub async fn handle_daemon_cli(subargs: &[String]) -> Result<(), Box<dyn std::er
             match turf_daemon::DaemonClient::connect(&socket_path).await {
                 Ok(client) => {
                     client.shutdown().await?;
-                    println!("\x1b[1;32m✔ TurfCode daemon stopped successfully.\x1b[0m");
+                    println!("\x1b[1;32m✔ Turf daemon stopped successfully.\x1b[0m");
                 }
                 Err(_) => {
                     println!(
-                        "\x1b[1;33mTurfCode daemon is not running\x1b[0m (socket at {}).",
+                        "\x1b[1;33mTurf daemon is not running\x1b[0m (socket at {}).",
                         socket_path.display()
                     );
                 }
@@ -922,7 +921,7 @@ pub async fn handle_daemon_cli(subargs: &[String]) -> Result<(), Box<dyn std::er
             match turf_daemon::DaemonClient::connect(&socket_path).await {
                 Ok(client) => match client.status().await {
                     Ok(st) => {
-                        println!("\x1b[1;32mTurfCode Daemon: RUNNING\x1b[0m");
+                        println!("\x1b[1;32mTurf Daemon: RUNNING\x1b[0m");
                         println!("  PID:             {}", st.pid);
                         println!("  Uptime:          {}s", st.uptime_secs);
                         println!("  Active Sessions: {}", st.active_sessions);
@@ -932,14 +931,14 @@ pub async fn handle_daemon_cli(subargs: &[String]) -> Result<(), Box<dyn std::er
                     }
                     Err(e) => {
                         println!(
-                            "\x1b[1;31mTurfCode Daemon: UNRESPONSIVE\x1b[0m (Error: {})",
+                            "\x1b[1;31mTurf Daemon: UNRESPONSIVE\x1b[0m (Error: {})",
                             e
                         );
                     }
                 },
                 Err(_) => {
                     println!(
-                        "\x1b[1;33mTurfCode Daemon: STOPPED\x1b[0m (Socket not responding at {})",
+                        "\x1b[1;33mTurf Daemon: STOPPED\x1b[0m (Socket not responding at {})",
                         socket_path.display()
                     );
                 }
@@ -1002,7 +1001,7 @@ pub async fn handle_session_cli(subargs: &[String]) -> Result<(), Box<dyn std::e
             let socket_path = turf_daemon::default_socket_path();
             if !turf_daemon::probe_daemon(&socket_path).await {
                 println!(
-                    "\x1b[1;33mTurfCode daemon is not running\x1b[0m (socket at {}).",
+                    "\x1b[1;33mTurf daemon is not running\x1b[0m (socket at {}).",
                     socket_path.display()
                 );
                 return Ok(());
@@ -1071,7 +1070,7 @@ pub async fn handle_session_cli(subargs: &[String]) -> Result<(), Box<dyn std::e
             let sock_path = turf_daemon::default_socket_path();
             if !turf_daemon::probe_daemon(&sock_path).await {
                 eprintln!(
-                    "\x1b[1;33mTurfCode daemon is not running\x1b[0m (socket at {}).",
+                    "\x1b[1;33mTurf daemon is not running\x1b[0m (socket at {}).",
                     sock_path.display()
                 );
                 std::process::exit(1);
@@ -1140,7 +1139,7 @@ pub async fn handle_pane_cli(subargs: &[String]) -> Result<(), Box<dyn std::erro
     let sock_path = turf_daemon::default_socket_path();
     if !turf_daemon::probe_daemon(&sock_path).await {
         eprintln!(
-            "\x1b[1;33mTurfCode daemon is not running\x1b[0m (socket at {}). Start it with: turf daemon start",
+            "\x1b[1;33mTurf daemon is not running\x1b[0m (socket at {}). Start it with: turf daemon start",
             sock_path.display()
         );
         std::process::exit(1);
@@ -1271,7 +1270,7 @@ pub async fn main_cli() -> Result<(), Box<dyn std::error::Error>> {
             print_help();
         }
         "--version" | "-v" => {
-            println!("turfcode v{}", VERSION);
+            println!("turf v{}", VERSION);
         }
         "list" => {
             handle_session_cli(&["list".to_string()]).await?;
@@ -1343,8 +1342,8 @@ mod tests {
         for line in box_lines {
             assert_eq!(
                 line.chars().count(),
-                77,
-                "Banner line width must be exactly 77 chars: {}",
+                45,
+                "Banner line width must be exactly 45 chars: {}",
                 line
             );
         }

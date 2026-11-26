@@ -1676,7 +1676,7 @@ impl TerminalCockpit {
 
     fn render_help_overlay(&self, area: Rect, buf: &mut Buffer) {
         let lines = [
-            " TurfCode Cockpit — Shortcuts & Commands ",
+            " Turf Cockpit — Shortcuts & Commands ",
             "",
             " Alt+T / Alt+W      New tab / Close tab",
             " Alt+1..9           Switch active tab",

@@ -2,7 +2,7 @@
 name = "turf-protocol"
 version = "0.1.0"
 edition = "2021"
-description = "Core protocols and message types for TurfCode"
+description = "Core protocols and message types for Turf"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -1,16 +1,16 @@
-# Contributing to TurfCode CLI
+# Contributing to Turf
 
 Contributions are welcome through Pull Requests against `main`. Because `main` is protected, direct pushes are disabled and every change goes through CI and maintainer review. All contributors follow our [Code of Conduct](./CODE_OF_CONDUCT.md) and private [Security Policy](./SECURITY.md).
 
-![TurfCode Contribution Flow](./docs/assets/contributing-flow.svg)
+![Turf Contribution Flow](./docs/assets/contributing-flow.svg)
 
 ## Setup & Branching
 
 Prerequisites: Rust stable toolchain (`2021` edition), Git `>= 2.20`, Node.js `>= 20`, and `tmux` (for interactive PTY tests on Linux/macOS/WSL).
 
 ```bash
-git clone https://github.com/YugSrivastav/turfcode-cli.git
-cd turfcode-cli
+git clone https://github.com/YugSrivastav/Turf.git
+cd Turf
 git checkout -b feat/your-short-description
 ```
 
@@ -18,7 +18,7 @@ Use scoped branch prefixes such as `feat/`, `fix/`, `docs/`, `refactor/`, or `te
 
 ## Where to Make Changes
 
-- [crates/](./crates) : Active Rust CLI (`turf`, `turfcode`, `turf-daemon`), TUI cockpit, PTY/VTE engine, encrypted tunnel, and lock/worktree core. Put all shipping CLI fixes and features here.
+- [crates/](./crates) : Active Rust CLI (`turf`, `turf-daemon`), TUI cockpit, PTY/VTE engine, encrypted tunnel, and lock/worktree core. Put all shipping CLI fixes and features here.
 - [src/](./src) and [bin/](./bin) : Earlier Node.js ESM prototype and test suite. Update only when maintaining legacy behavior or porting features such as [src/agent-runner.js](./src/agent-runner.js) into Rust.
 
 ## Verification
