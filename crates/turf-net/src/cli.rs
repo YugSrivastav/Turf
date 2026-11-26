@@ -13,10 +13,9 @@ use turf_tui::{PeerInfo, TerminalCockpit};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Banner and splash printing for TurfCode CLI.
-pub fn print_splash() {
-    println!(
-        "\x1b[1;32m
+/// Build the ASCII splash banner string for TurfCode CLI.
+pub fn format_splash() -> String {
+    "\x1b[1;32m
   ╔═════════════════════════════════════════════════════════════════════════╗
   ║   ████████╗██╗   ██╗██████╗ ███████╗ ██████╗ ██████╗ ██████╗ ███████╗   ║
   ║   ╚══██╔══╝██║   ██║██╔══██╗██╔════╝██╔════╝██╔═══██╗██╔══██╗██╔════╝   ║
@@ -24,11 +23,14 @@ pub fn print_splash() {
   ║      ██║   ██║   ██║██╔══██╗██╔══╝  ██║     ██║   ██║██║  ██║██╔══╝     ║
   ║      ██║   ╚██████╔╝██║  ██║██║     ╚██████╗╚██████╔╝██████╔╝███████╗   ║
   ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝   ║
-  ║                      ELECTRIC LIME COCKPIT v{}                       ║
   ╚═════════════════════════════════════════════════════════════════════════╝
-\x1b[0m",
-        VERSION
-    );
+\x1b[0m"
+        .to_string()
+}
+
+/// Banner and splash printing for TurfCode CLI.
+pub fn print_splash() {
+    println!("{}", format_splash());
 }
 
 /// Print CLI help information.
@@ -39,7 +41,7 @@ pub fn print_help() {
 \x1b[2mUSAGE:\x1b[0m
   \x1b[32mturfcode\x1b[0m                          Open interactive launcher menu (Create or Join a Turf)
   \x1b[32mturf\x1b[0m                              Alias for turfcode
-  \x1b[32mturf host [dir]\x1b[0m                   Host a shared Turf session in the given directory (default: .)
+  \x1b[32mturf host [dir] [--open-folder]\x1b[0m   Host a shared Turf session in the given directory (default: .)
   \x1b[32mturf join <id> [url]\x1b[0m              Join an active Turf session using room code
   \x1b[32mturf list\x1b[0m                         List active daemon sessions
   \x1b[32mturf attach [name]\x1b[0m                Attach interactive TUI client to a named session (default: default)
@@ -57,13 +59,13 @@ pub fn print_help() {
 \x1b[2mCOCKPIT SHORTCUTS:\x1b[0m
   Alt+T / Alt+W      New tab / Close tab
   Alt+1..9           Switch tab
-  Alt+V / Alt+S      Vertical / Horizontal split
-  Alt+O / Alt+X      Next split pane / Close active pane
+  Alt+V / Alt+H      Vertical / Horizontal split (or Alt+S)
+  F3 / Alt+O         Next split pane (Alt+X closes pane)
   Alt+B              Toggle Intent Board sidebar
-  Alt+Enter          Toggle command prompt focus
+  F2 / Alt+P         Toggle command prompt focus (or Alt+Enter)
   Alt+Up / Alt+Down  Scroll terminal history
-  Alt+? / F1         Show shortcuts & slash commands
-  Alt+D / Ctrl+Q     Detach (keep running) / Quit
+  F1 / Alt+?         Show shortcuts & slash commands
+  F4 / Alt+D         Detach (keep running) / Ctrl+Q quits
 "
     );
 }
@@ -125,25 +127,127 @@ pub fn open_file_manager(target_dir: &Path) {
     }
 }
 
-/// Normalize workspace folder path.
-pub fn normalize_workspace_path(input: &str) -> PathBuf {
-    let trimmed = input.trim().trim_matches('"').trim_matches('\'');
-    if trimmed.is_empty() || trimmed == "." {
-        env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    } else {
-        let path = PathBuf::from(trimmed);
-        if path.is_absolute() {
-            path
-        } else {
-            env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join(path)
+/// Translate a Windows drive path (e.g. `C:\Users\name\repo`) to a WSL `/mnt/<drive>/...` path when running on Linux.
+fn translate_windows_path_for_unix(input: &str) -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        return None;
+    }
+    let bytes = input.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        if bytes.len() > 2 && bytes[2] != b'\\' && bytes[2] != b'/' {
+            return None;
         }
+        if let Ok(out) = std::process::Command::new("wslpath")
+            .arg("-u")
+            .arg(input)
+            .output()
+        {
+            if out.status.success() {
+                let converted = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !converted.is_empty() {
+                    return Some(PathBuf::from(converted));
+                }
+            }
+        }
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        let rest = input[2..].trim_start_matches(['\\', '/']).replace('\\', "/");
+        if rest.is_empty() {
+            return Some(PathBuf::from(format!("/mnt/{}", drive)));
+        }
+        return Some(PathBuf::from(format!("/mnt/{}/{}", drive, rest)));
+    }
+    None
+}
+
+/// Normalize workspace folder path (handles quotes, `~`, and Windows paths pasted into WSL).
+pub fn normalize_workspace_path(input: &str) -> PathBuf {
+    let trimmed = input.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.is_empty() || trimmed == "." {
+        return env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    }
+
+    if let Some(wsl_path) = translate_windows_path_for_unix(trimmed) {
+        return wsl_path;
+    }
+
+    if trimmed == "~" || trimmed.starts_with("~/") || trimmed.starts_with("~\\") {
+        if let Ok(home) = env::var("HOME") {
+            let suffix = trimmed[1..].trim_start_matches(['/', '\\']).replace('\\', "/");
+            let base = PathBuf::from(home);
+            return if suffix.is_empty() { base } else { base.join(suffix) };
+        }
+    }
+
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        path
+    } else {
+        env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
     }
 }
 
-/// Detect the current git branch for a workspace directory.
+/// Validate that the user entered a real, accessible local repository directory path.
+pub fn validate_host_directory(input: &str) -> Result<PathBuf, String> {
+    let trimmed = input.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.is_empty() {
+        return Err(
+            "Invalid path: please paste a valid repository folder path.".to_string(),
+        );
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("ssh://")
+        || lower.starts_with("git@")
+    {
+        return Err(
+            "Invalid path: enter a local file/folder path on disk, not a URL.".to_string(),
+        );
+    }
+
+    let resolved = normalize_workspace_path(trimmed);
+    if !resolved.exists() {
+        return Err(format!(
+            "Invalid path: '{}' does not exist.",
+            resolved.display()
+        ));
+    }
+    if !resolved.is_dir() {
+        return Err(format!(
+            "Invalid path: '{}' is a file, not a folder. Paste the repo folder path.",
+            resolved.display()
+        ));
+    }
+    if let Err(err) = std::fs::read_dir(&resolved) {
+        return Err(format!(
+            "Invalid path: cannot access '{}' ({}).",
+            resolved.display(),
+            err
+        ));
+    }
+
+    Ok(resolved.canonicalize().unwrap_or(resolved))
+}
+
+/// Detect the current git branch for a workspace directory (including unborn branches).
 fn detect_git_branch(target_dir: &Path) -> Option<String> {
+    if let Ok(out) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(target_dir)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+    {
+        if out.status.success() {
+            let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !branch.is_empty() {
+                return Some(branch);
+            }
+        }
+    }
+
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(target_dir)
@@ -246,7 +350,21 @@ pub async fn run_interactive_choice_with_cwd(
 /// Host a TurfCode session in the target directory.
 pub async fn run_host(target_dir: &Path, port: u16) -> Result<(), NetError> {
     if !target_dir.exists() {
-        std::fs::create_dir_all(target_dir)?;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Invalid path: '{}' does not exist.", target_dir.display()),
+        )
+        .into());
+    }
+    if !target_dir.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "Invalid path: '{}' is not a directory.",
+                target_dir.display()
+            ),
+        )
+        .into());
     }
 
     let room_code = crypto::generate_room_code();
@@ -684,12 +802,28 @@ pub async fn run_interactive_prompt() -> Result<(), NetError> {
         "1" => {
             print!("\x1b[2J\x1b[1;1H");
             print_splash();
-            print!("  \x1b[32mEnter folder to host [default: .]: \x1b[0m");
-            io::stdout().flush().ok();
-            let mut dir_line = String::new();
-            stdin.lock().read_line(&mut dir_line).ok();
-            let target_dir = normalize_workspace_path(&dir_line);
-            open_file_manager(&target_dir);
+            println!(
+                "  \x1b[1mHost a Repository\x1b[0m\n  \x1b[2mPaste the local folder/file path of the repository you want to host.\n  (e.g. C:\\Users\\you\\repo or /home/you/repo)\x1b[0m\n"
+            );
+            let target_dir = loop {
+                print!("  \x1b[32mPaste repository path: \x1b[0m");
+                io::stdout().flush().ok();
+                let mut dir_line = String::new();
+                let read_bytes = stdin.lock().read_line(&mut dir_line).unwrap_or(0);
+                if read_bytes == 0 {
+                    println!("\n  Exiting.");
+                    return Ok(());
+                }
+                match validate_host_directory(&dir_line) {
+                    Ok(valid_dir) => break valid_dir,
+                    Err(err_msg) => {
+                        println!("  \x1b[31m{err_msg}\x1b[0m\n");
+                    }
+                }
+            };
+            if env::args().any(|a| a == "--open" || a == "--open-folder") {
+                open_file_manager(&target_dir);
+            }
             run_host(&target_dir, 0).await?;
         }
         "2" => {
@@ -1094,9 +1228,12 @@ pub async fn handle_pane_cli(subargs: &[String]) -> Result<(), Box<dyn std::erro
 /// Main CLI entry point.
 pub async fn main_cli() -> Result<(), Box<dyn std::error::Error>> {
     let raw_args: Vec<String> = env::args().collect();
+    let open_folder = raw_args
+        .iter()
+        .any(|a| a == "--open" || a == "--open-folder");
     let args: Vec<String> = raw_args
         .into_iter()
-        .filter(|a| a != "--no-cockpit")
+        .filter(|a| a != "--no-cockpit" && a != "--open" && a != "--open-folder")
         .collect();
 
     if args.len() <= 1 {
@@ -1153,12 +1290,17 @@ pub async fn main_cli() -> Result<(), Box<dyn std::error::Error>> {
             handle_daemon_cli(&args[2..]).await?;
         }
         "host" => {
-            let target = if args.len() > 2 {
-                normalize_workspace_path(&args[2])
-            } else {
-                normalize_workspace_path(".")
+            let raw_target = if args.len() > 2 { &args[2] } else { "." };
+            let target = match validate_host_directory(raw_target) {
+                Ok(dir) => dir,
+                Err(msg) => {
+                    eprintln!("\x1b[31mError:\x1b[0m {msg}");
+                    std::process::exit(1);
+                }
             };
-            open_file_manager(&target);
+            if open_folder {
+                open_file_manager(&target);
+            }
             run_host(&target, 0).await?;
         }
         "join" => {
@@ -1195,12 +1337,10 @@ mod tests {
 
     #[test]
     fn test_print_splash_banner_correctness() {
-        let splash = format!(
-            "  ╔═════════════════════════════════════════════════════════════════════════╗\n  ║   ████████╗██╗   ██╗██████╗ ███████╗ ██████╗ ██████╗ ██████╗ ███████╗   ║\n  ║   ╚══██╔══╝██║   ██║██╔══██╗██╔════╝██╔════╝██╔═══██╗██╔══██╗██╔════╝   ║\n  ║      ██║   ██║   ██║██████╔╝█████╗  ██║     ██║   ██║██║  ██║█████╗     ║\n  ║      ██║   ██║   ██║██╔══██╗██╔══╝  ██║     ██║   ██║██║  ██║██╔══╝     ║\n  ║      ██║   ╚██████╔╝██║  ██║██║     ╚██████╗╚██████╔╝██████╔╝███████╗   ║\n  ║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝   ║\n  ║                      ELECTRIC LIME COCKPIT v{}                       ║\n  ╚═════════════════════════════════════════════════════════════════════════╝",
-            VERSION
-        );
-
-        for line in splash.lines() {
+        let splash = format_splash();
+        let box_lines: Vec<&str> = splash.lines().filter(|l| l.contains('╔') || l.contains('║') || l.contains('╚')).collect();
+        assert_eq!(box_lines.len(), 8);
+        for line in box_lines {
             assert_eq!(
                 line.chars().count(),
                 77,
@@ -1208,6 +1348,33 @@ mod tests {
                 line
             );
         }
+        assert!(!splash.contains(VERSION));
+        assert!(!splash.contains("ELECTRIC LIME"));
+    }
+
+    #[test]
+    fn test_validate_host_directory_cases() {
+        assert!(validate_host_directory("").is_err());
+        assert!(validate_host_directory("   ").is_err());
+        assert!(validate_host_directory("https://github.com/org/repo").is_err());
+        let temp = tempdir().unwrap();
+        let ok = validate_host_directory(temp.path().to_str().unwrap());
+        assert!(ok.is_ok());
+
+        let file_path = temp.path().join("file.txt");
+        std::fs::write(&file_path, "hi").unwrap();
+        assert!(validate_host_directory(file_path.to_str().unwrap()).is_err());
+        assert!(validate_host_directory(temp.path().join("missing").to_str().unwrap()).is_err());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn test_translate_windows_path_for_unix() {
+        assert_eq!(
+            translate_windows_path_for_unix(r"C:\Users\yugsr\Waitlist"),
+            Some(PathBuf::from("/mnt/c/Users/yugsr/Waitlist"))
+        );
+        assert_eq!(translate_windows_path_for_unix("/tmp/test"), None);
     }
 
     #[test]

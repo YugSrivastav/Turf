@@ -126,8 +126,8 @@ sequenceDiagram
 ## 6. UI & Ergonomics
 
 - **Spatial Layout**:
-  - **Top Row**: Full-width tab strip with active pill badge, dynamic foreground command title, and right-aligned session status (`● TURF-XXXX • HOST`).
-  - **Left Sidebar (~22%)**: Borderless column separated by a single hairline vertical divider (`│`), displaying `spaces`, `intents & tasks`, `active locks`, and `peers`.
-  - **Main Surface**: Borderless BSP split panes rendering VTE buffers directly onto native terminal transparency (`Color::Reset`).
-  - **Bottom Bar**: Hairline divider (`─`), minimal command prompt (`> `), and shortcut hint.
-- **Non-Conflicting Controls**: Multiplexer shortcuts use `Alt+...` combinations so `Tab` completion and `Ctrl+C` / `Ctrl+W` / `Ctrl+B` behave naturally inside running terminal programs.
+  - **Top Row**: Full-width scrollable tab strip with active blue pill (`#89b4fa` / `#11111b`), `<` / `>` horizontal overflow arrows, pinned `+` `new tab` modal trigger, click/right-click tab context menu (`New tab`, `Rename`, `Close`), and right-aligned session status (`● TURF-XXXX • HOST`).
+  - **Left Sidebar (~22%)**: Borderless column separated by a single hairline vertical divider (`│`), displaying `spaces`, `intents & tasks`, `active locks`, `peers`, and a subtle `? help «` footer.
+  - **Main Surface**: Full-height borderless BSP split panes rendering VTE buffers directly onto native terminal transparency (`Color::Reset`), with pane-bounded mouse copy selection (OSC 52 / `clip.exe`), mouse wheel scrolling, and clickable OSC 8 / wrapped URLs.
+  - **On-Demand Modals**: Centered popups for `new tab` / `rename tab`, tab actions, `?` shortcuts overlay, and `F2` / `Alt+P` slash-command entry without consuming permanent terminal rows.
+- **Non-Conflicting Controls**: Multiplexer shortcuts use `Alt+...` and `F1`–`F4` combinations so `Tab` completion and `Ctrl+C` / `Ctrl+W` / `Ctrl+B` behave naturally inside running terminal programs.

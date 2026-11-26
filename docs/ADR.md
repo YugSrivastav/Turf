@@ -706,6 +706,28 @@ All maintainers, contributors, and automated agents MUST adhere to these invaria
 - **Reason:** Provides instant visual awareness of multiplexer workloads matching modern high-performance terminal multiplexers (Zellij, WezTerm, Herdr), eliminating static placeholder titles.
 - **Worker Invariant:** PTY process group queries must never block the event loop or panic on non-Linux platforms. Subprocess command parsing must sanitize leading dashes from login shells (`-bash`) and normalize executable path basenames.
 
+---
+## [MD-056] 2026-11-26: Full-Height Herdr Cockpit UX, Unlimited Scrollable Tabs with Context Menu, OSC 8 Hyperlinks, Pane-Bounded Copy, and Strict WSL Path Hosting
+- **Context:** Real-user desktop testing inside full-screen Windows Terminal (WSL + `ENG IN` keyboard layout, running `vim`, `codex`, and `agy` OAuth login) uncovered critical usability gaps:
+  1. The launcher's Screen 1 included `ELECTRIC LIME COCKPIT v0.1.0` clutter, and Screen 2 attempted `create_dir_all` inside `System32` when pasting quoted Windows paths (`"C:\Users\yugsr\Waitlist"`) into WSL instead of validating and translating drive paths.
+  2. The permanent 2-row bottom input bar wasted vertical space and confused users whose terminal panes already had shell prompts.
+  3. Top tabs displayed noisy `: zsh` suffixes, capped out when 16 tabs filled the header row (`+` disappeared), lacked click-to-open `+` modal, and lacked a tab context menu (`New tab`, `Rename`, `Close`).
+  4. Native Windows Terminal selection leaked across split dividers into the left sidebar, and OSC 8 hyperlinks (`→ Click here to authenticate` in `agy`) were non-clickable because `turf-vte` discarded OSC 8 sequences and `turf-tui` suppressed mouse events.
+- **The Fork:** Leave `turf-tui` as keyboard-only with a static 16-tab ceiling and bottom bar vs. Adopt full Herdr UX parity with full-height panes, unlimited scrollable tabs, tab context menu, pane-bounded mouse copy, OSC 8 / URL click-to-open, and strict launcher path validation.
+- **Resolution:**
+  1. **Launcher & WSL Path Hosting (`crates/turf-net/src/cli.rs`):**
+     - Kept the 77-column `TURFCODE` ASCII box splash without version text clutter.
+     - Added `translate_windows_path_for_unix` + `validate_host_directory` so Screen 2 explicitly prompts for a local repository folder path, loops with `Invalid path:` on blank/URL/missing/non-directory inputs, and converts quoted Windows paths (`"C:\Users\..."`) into `/mnt/c/Users/...`.
+     - Switched split panes in `turf-daemon` to inherit parent `cwd`, made file-manager launch opt-in (`--open` / `--open-folder`), and fixed unborn git branch detection (`git symbolic-ref --short HEAD`).
+  2. **Full-Height Cockpit & Scrollable Tabs (`crates/turf-tui/src/{layout.rs,tabs.rs,sidebar.rs,cockpit.rs}`):**
+     - Removed the bottom input bar reservation (`input_divider_area` / `input_bar_area` height 0) and converted `/task` / `/lock` command entry into an on-demand `F2`/`Alt+P` centered modal while displaying `? help «` in the sidebar footer.
+     - Rendered clean numbered Herdr capsules (` 1 `, active `#89b4fa` / `#11111b`), horizontal `<` / `>` scroll arrows with pinned `+` so unlimited tabs (20+) work past header width, and a `[ New tab | Rename | Close ]` dropdown menu on active-tab left-click or tab right-click.
+     - Added Windows Terminal-safe `F1`–`F4` / `Alt+P` / `Alt+H` bindings alongside existing `Alt+...` shortcuts.
+  3. **OSC 8 Hyperlinks, Wide Glyphs & Pane-Bounded Selection (`crates/turf-vte`, `crates/turf-tui`):**
+     - Added `hyperlink: Option<Arc<str>>` to `turf_vte::Cell`, OSC 8 (`]8;;<uri>`) parsing in `Terminal::osc_dispatch`, and wide-glyph continuation (`'\0'`) skipping in `vte_blit.rs`.
+     - Enabled `EnableMouseCapture` + `handle_mouse` in `TerminalCockpit`: drags clamp strictly within the clicked pane `Rect` and copy via OSC 52 + `clip.exe`; single clicks on OSC 8 cells or wrapped `http(s)://` URLs open in the host browser (`rundll32.exe url.dll,FileProtocolHandler` on WSL/Windows); wheel events scroll pane history.
+- **Worker Invariant:** Tab strip `+` button must remain pinned regardless of tab count via horizontal scroll offsets. Mouse selection coordinates must clamp strictly to the target pane's `Rect`. Interactive hosting must validate local directory existence before spawning daemon panes.
+
 
 
 

@@ -43,10 +43,13 @@ Use clear branch prefixes such as `feat/`, `fix/`, `docs/`, `refactor/`, or `tes
 #### Running Checks Locally
 
 ```bash
+# Stop any running background daemon so socket status tests don't race
+turf daemon stop || true
+
 # Rust workspace checks & tests
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets
-cargo test --workspace
+cargo test --workspace -- --test-threads=1
 
 # Real-user interactive PTY E2E suite (Linux/macOS/WSL with tmux)
 bash test/e2e-pty.sh
@@ -82,8 +85,10 @@ If your change implements or updates a recorded architectural decision, referenc
 ## Architectural Guidelines & Invariants
 
 Before modifying core subsystems, review:
+- [AGENTS.md](./AGENTS.md) — AI contributor guide, crate roles, and UI/platform rules.
+- [ROADMAP.md](./ROADMAP.md) — product vision, built features, and open roadmap.
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — system topology and crate responsibilities.
-- [docs/ADR.md](./docs/ADR.md) — architectural decision records (`MD-001` through `MD-055`).
+- [docs/ADR.md](./docs/ADR.md) — architectural decision records (`MD-001` through `MD-056`).
 
 Key invariants to keep in mind:
 - **Never block the TUI event loop**: Keep PTY I/O and IPC non-blocking to preserve 60fps rendering.

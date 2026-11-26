@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::color::Color;
 
 /// Text rendering flags and styling attributes.
@@ -37,6 +39,7 @@ pub struct Cell {
     pub fg: Color,
     pub bg: Color,
     pub flags: CellFlags,
+    pub hyperlink: Option<Arc<str>>,
 }
 
 impl Default for Cell {
@@ -46,6 +49,7 @@ impl Default for Cell {
             fg: Color::Default,
             bg: Color::Default,
             flags: CellFlags::default(),
+            hyperlink: None,
         }
     }
 }
@@ -53,7 +57,19 @@ impl Default for Cell {
 impl Cell {
     /// Construct a new cell with the specified character and styling.
     pub fn new(c: char, fg: Color, bg: Color, flags: CellFlags) -> Self {
-        Self { c, fg, bg, flags }
+        Self {
+            c,
+            fg,
+            bg,
+            flags,
+            hyperlink: None,
+        }
+    }
+
+    /// Attach an OSC 8 hyperlink URI to this cell.
+    pub fn with_hyperlink(mut self, hyperlink: Option<Arc<str>>) -> Self {
+        self.hyperlink = hyperlink;
+        self
     }
 
     /// Construct a plain cell with default colors and no styling.
@@ -70,5 +86,6 @@ impl Cell {
         self.fg = Color::Default;
         self.bg = Color::Default;
         self.flags.reset();
+        self.hyperlink = None;
     }
 }

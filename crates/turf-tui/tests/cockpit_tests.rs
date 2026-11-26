@@ -1,4 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -8,7 +10,7 @@ use turf_protocol::intent::{TaskCard, TaskStatus};
 use turf_protocol::locks::FileLock;
 use turf_tui::layout::CockpitLayout;
 use turf_tui::pane::SplitDirection;
-use turf_tui::theme::{COLOR_ACCENT, COLOR_ACTIVE_PILL, COLOR_ELECTRIC_LIME};
+use turf_tui::theme::{COLOR_ACCENT, COLOR_CRUST, COLOR_ELECTRIC_LIME};
 use turf_tui::{FocusArea, TerminalCockpit};
 
 #[test]
@@ -36,15 +38,13 @@ fn test_layout_rect_calculation_with_sidebar() {
     assert_eq!(layout.tab_strip_area.y, 0);
     assert_eq!(layout.tab_strip_area.height, 1);
 
-    // Bottom input bar and divider
-    assert_eq!(layout.input_divider_area.y, 38);
-    assert_eq!(layout.input_divider_area.height, 1);
-    assert_eq!(layout.input_bar_area.y, 39);
-    assert_eq!(layout.input_bar_area.height, 1);
+    // Bottom input bar removed so panes reach full height cleanly
+    assert_eq!(layout.input_divider_area.height, 0);
+    assert_eq!(layout.input_bar_area.height, 0);
 
-    // Terminal surface area: height = 40 - 3 = 37 (y: 1..38)
+    // Terminal surface area: height = 40 - 1 = 39 (y: 1..40)
     assert_eq!(layout.terminal_area.y, 1);
-    assert_eq!(layout.terminal_area.height, 37);
+    assert_eq!(layout.terminal_area.height, 39);
 }
 
 #[test]
@@ -242,16 +242,17 @@ fn test_headless_rendering_cockpit_full_surface() {
     let layout = CockpitLayout::calculate(Rect::new(0, 0, 120, 30), true);
 
     // Verify Tab Strip on Row 0:
-    // Should have active tab pill: ` 1: Shell `
+    // Clean Herdr numbered capsule (` 1    `) + `+` + session badge
     let mut row0_text = String::new();
     for x in 0..120 {
         row0_text.push_str(buffer.cell((x, 0)).unwrap().symbol());
     }
     assert!(
-        row0_text.contains("1: Shell"),
-        "Row 0 must contain '1: Shell': {}",
+        row0_text.contains(" 1 ") && !row0_text.contains("1: Shell"),
+        "Row 0 must render clean numbered pill without '1: Shell': {}",
         row0_text
     );
+    assert!(row0_text.contains("+"), "Row 0 must show + add button: {}", row0_text);
     assert!(
         row0_text.contains("TURF-7A9B"),
         "Row 0 must contain session code 'TURF-7A9B': {}",
@@ -263,10 +264,10 @@ fn test_headless_rendering_cockpit_full_surface() {
         row0_text
     );
 
-    // Verify Active Pill styling: Catppuccin active pill background and accent fg
+    // Verify Active Pill styling: Herdr blue accent background with dark crust fg
     let pill_cell = buffer.cell((layout.tab_strip_area.x + 1, 0)).unwrap();
-    assert_eq!(pill_cell.bg, COLOR_ACTIVE_PILL);
-    assert_eq!(pill_cell.fg, COLOR_ACCENT);
+    assert_eq!(pill_cell.bg, COLOR_ACCENT);
+    assert_eq!(pill_cell.fg, COLOR_CRUST);
 
     // Verify Sidebar single vertical divider (│) on column 26
     let div_x = layout.sidebar_divider.x;
@@ -275,7 +276,7 @@ fn test_headless_rendering_cockpit_full_surface() {
         assert_eq!(cell.symbol(), "│", "Divider cell at ({}, {}) should be │", div_x, y);
     }
 
-    // Verify Sidebar content
+    // Verify Sidebar content & subtle footer hint
     let mut sidebar_text = String::new();
     for y in 0..30 {
         for x in 0..div_x {
@@ -289,19 +290,11 @@ fn test_headless_rendering_cockpit_full_surface() {
     assert!(sidebar_text.contains("peers"));
     assert!(sidebar_text.contains("Build Ra"));
     assert!(sidebar_text.contains("src/cockpit.rs"));
+    assert!(sidebar_text.contains("? help"));
+    assert!(sidebar_text.contains("«"));
 
-    // Verify Input divider and prompt
-    let input_div_y = layout.input_divider_area.y;
-    let div_cell = buffer.cell((layout.main_area.x, input_div_y)).unwrap();
-    assert_eq!(div_cell.symbol(), "─");
-
-    let prompt_y = layout.input_bar_area.y;
-    let mut prompt_row = String::new();
-    for x in layout.main_area.x..120 {
-        prompt_row.push_str(buffer.cell((x, prompt_y)).unwrap().symbol());
-    }
-    assert!(prompt_row.contains("> "));
-    assert!(prompt_row.contains("« ? for shortcuts"));
+    // Verify NO permanent bottom input bar
+    assert_eq!(layout.input_bar_area.height, 0);
 }
 
 #[test]
@@ -469,10 +462,10 @@ fn test_cockpit_viewport_scrolling_hotkeys_and_badge() {
 fn test_dynamic_tab_capsule_pill_badges() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 1));
 
-    // Test 1: Active tab with vim command
+    // Default tabs render clean numbered capsules without `zsh`/`bash` suffix; custom named tabs render custom name
     let tabs = vec![
         turf_tui::TabItem::new(1, "Shell")
-            .with_foreground_cmd(Some("vim src/main.rs".to_string())),
+            .with_foreground_cmd(Some("zsh".to_string())),
         turf_tui::TabItem::new(2, "Build"),
     ];
 
@@ -490,37 +483,9 @@ fn test_dynamic_tab_capsule_pill_badges() {
     for x in 0..100 {
         row_str.push_str(buf.cell((x, 0)).unwrap().symbol());
     }
-    assert!(
-        row_str.contains(" 1: vim src/main.rs "),
-        "Tab strip should render dynamic active process pill ' 1: vim src/main.rs ', got: {}",
-        row_str
-    );
-    assert!(row_str.contains(" 2 "));
-
-    // Test 2: Idle shell tab pill
-    let mut buf2 = Buffer::empty(Rect::new(0, 0, 100, 1));
-    let idle_tabs = vec![
-        turf_tui::TabItem::new(1, "Shell").with_foreground_cmd(Some("bash".to_string())),
-    ];
-    turf_tui::render_tab_strip(
-        Rect::new(0, 0, 100, 1),
-        &idle_tabs,
-        0,
-        "TURF-7A9B",
-        "HOST",
-        "pilot",
-        &mut buf2,
-    );
-
-    let mut row2_str = String::new();
-    for x in 0..100 {
-        row2_str.push_str(buf2.cell((x, 0)).unwrap().symbol());
-    }
-    assert!(
-        row2_str.contains(" 1: bash "),
-        "Tab strip should render dynamic idle shell pill ' 1: bash ', got: {}",
-        row2_str
-    );
+    assert!(row_str.contains(" 1 ") && !row_str.contains("zsh"), "got: {row_str}");
+    assert!(row_str.contains(" Build "), "got: {row_str}");
+    assert!(row_str.contains("+"), "got: {row_str}");
 }
 
 #[test]
@@ -637,4 +602,185 @@ fn test_utf8_input_state_and_help_overlay_and_dedup_locks() {
             .scroll_offset(),
         0
     );
+
+    // 6. Universal Windows-Terminal-safe bindings: F2 / Alt+P, Alt+H, F3, F4
+    assert_eq!(cockpit.focus, FocusArea::Terminal);
+    cockpit.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+    assert_eq!(cockpit.focus, FocusArea::Input);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    assert_eq!(cockpit.focus, FocusArea::Terminal);
+
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT));
+    assert_eq!(cockpit.tabs[0].pane_manager.pane_count(), 2);
+    let second_id = cockpit.tabs[0].pane_manager.active_pane_id();
+    cockpit.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+    assert_ne!(cockpit.tabs[0].pane_manager.active_pane_id(), second_id);
+
+    assert!(!cockpit.is_detached);
+    cockpit.handle_key(KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE));
+    assert!(cockpit.is_detached);
+    assert!(cockpit.should_exit);
+}
+
+#[test]
+fn test_mouse_tab_add_modal_switch_and_pane_bounded_copy_and_links() {
+    let area = Rect::new(0, 0, 120, 30);
+    let mut cockpit = TerminalCockpit::new_headless("TURF-TEST", "HOST", "tester", 29, 93);
+    let layout = CockpitLayout::calculate(area, true);
+
+    // 1. Click '+' button on tab strip -> opens Herdr "new tab" modal pre-filled with "2"
+    let plus_x = layout.tab_strip_area.x + 8; // after 6-col pill ` 1    ` + 1 spacer + 1 offset
+    cockpit.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: plus_x,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert!(cockpit.new_tab_modal.active);
+    assert_eq!(cockpit.new_tab_modal.input.value, "2");
+
+    // Clear with Ctrl+C, type "dev", press Enter -> adds tab 2 named "dev"
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert_eq!(cockpit.new_tab_modal.input.value, "");
+    for ch in ['d', 'e', 'v'] {
+        cockpit.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    cockpit.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(!cockpit.new_tab_modal.active);
+    assert_eq!(cockpit.tabs.len(), 2);
+    assert_eq!(cockpit.tabs[1].title, "dev");
+    assert_eq!(cockpit.active_tab_index, 1);
+
+    // Click Tab 1 pill -> switches active_tab_index back to 0
+    cockpit.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: layout.tab_strip_area.x + 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert_eq!(cockpit.active_tab_index, 0);
+
+    // 2. Write text + OSC 8 link inside pane 1
+    {
+        let pane = cockpit.tabs[0].pane_manager.active_pane_mut().unwrap();
+        pane.terminal.process_str(
+            "CopyThisOnly\r\n\x1b]8;;https://accounts.google.com/o/oauth2/auth?client_id=123&scope=openid\x07-> Click here to authenticate\x1b]8;;\x07\r\n",
+        );
+    }
+
+    // Drag selection starting inside pane and crossing left across the sidebar divider -> must clamp strictly inside pane!
+    let pane_x = layout.terminal_area.x;
+    let pane_y = layout.terminal_area.y;
+    cockpit.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: pane_x + 11,
+            row: pane_y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    cockpit.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 2, // Inside left sidebar!
+            row: pane_y,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    let sel = cockpit.selection.expect("selection should be active");
+    assert_eq!(sel.start, (11, 0));
+    assert_eq!(sel.end, (0, 0)); // Clamped at pane column 0!
+    let extracted = cockpit.tabs[0]
+        .pane_manager
+        .get_pane(sel.pane_id)
+        .unwrap()
+        .extract_selected_text((sel.start, sel.end));
+    assert_eq!(extracted, "CopyThisOnly");
+
+    // 3. Clicking OSC 8 cell resolves full OAuth URL
+    let pane = cockpit.tabs[0].pane_manager.active_pane().unwrap();
+    assert_eq!(
+        pane.link_at(5, 1).as_deref(),
+        Some("https://accounts.google.com/o/oauth2/auth?client_id=123&scope=openid")
+    );
+}
+
+#[test]
+fn test_unlimited_scrollable_tabs_and_tab_context_menu() {
+    let area = Rect::new(0, 0, 100, 30);
+    let mut cockpit = TerminalCockpit::new_headless("TURF-TEST", "HOST", "tester", 29, 75);
+    let layout = CockpitLayout::calculate(area, true);
+
+    // 1. Open 20 tabs (>16) and verify pinned '+' stays visible + '<' scroll indicator appears
+    for _ in 0..19 {
+        cockpit.add_tab_headless("Shell");
+    }
+    assert_eq!(cockpit.tabs.len(), 20);
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| cockpit.render(f.area(), f.buffer_mut())).unwrap();
+    let buf = terminal.backend().buffer();
+    let mut row0 = String::new();
+    for x in 0..100 {
+        row0.push_str(buf.cell((x, 0)).unwrap().symbol());
+    }
+    assert!(row0.contains(" < "), "Scrolled tab bar should render '<': {row0}");
+    assert!(row0.contains(" 20 "), "Tab 20 pill should be scrolled into view: {row0}");
+    assert!(row0.contains("+"), "Add '+' button must remain pinned after 20 tabs: {row0}");
+
+    // 2. Clicking the active tab pill opens Herdr tab context menu (New tab, Rename, Close)
+    let active_pill_x = buf
+        .content()
+        .iter()
+        .take(100)
+        .position(|c| c.symbol() == "2")
+        .unwrap() as u16;
+    cockpit.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: active_pill_x,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert!(cockpit.tab_menu.active);
+    assert_eq!(cockpit.tab_menu.tab_index, 19);
+
+    // Select 'Rename' (Down + Enter) -> rename tab 20 to "prod"
+    cockpit.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    cockpit.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(cockpit.new_tab_modal.active);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    for ch in ['p', 'r', 'o', 'd'] {
+        cockpit.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    cockpit.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(cockpit.tabs[19].title, "prod");
+
+    // Right-click tab pill and select 'Close' (Down x2 + Enter) -> closes back to 19 tabs
+    cockpit.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: active_pill_x,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        area,
+    );
+    assert!(cockpit.tab_menu.active);
+    cockpit.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    cockpit.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    cockpit.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(cockpit.tabs.len(), 19);
+    assert!(layout.tab_strip_area.height == 1);
 }
