@@ -1,75 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 155" width="860" height="155" role="img" aria-label="TurfCode CLI Architecture">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 185" width="880" height="185" role="img" aria-label="TurfCode CLI System Architecture">
   <defs>
-    <linearGradient id="boxGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#e8f0fe"/>
-      <stop offset="100%" stop-color="#c6d8f7"/>
-    </linearGradient>
-    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#dbeafe"/>
-      <stop offset="100%" stop-color="#93c5fd"/>
-    </linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
     </marker>
-    <style>
-      .box { fill: url(#boxGrad); stroke: #64748b; stroke-width: 1.5; rx: 8; ry: 8; }
-      .boxAccent { fill: url(#accentGrad); stroke: #3b82f6; stroke-width: 1.75; rx: 8; ry: 8; }
-      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #0f172a; text-anchor: middle; }
-      .sub { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; fill: #334155; text-anchor: middle; }
-      .lbl { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 500; fill: #94a3b8; text-anchor: middle; }
-      .line { stroke: #64748b; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
-      .bi { stroke: #64748b; stroke-width: 1.6; fill: none; marker-start: url(#arrow); marker-end: url(#arrow); }
-    </style>
   </defs>
 
-  <!-- Launcher / Tunnel -->
-  <rect class="box" x="12" y="24" width="132" height="54"/>
-  <text class="title" x="78" y="47">CLI &amp; Tunnel</text>
-  <text class="sub" x="78" y="64">turf-net</text>
+  <!-- Subtle card backdrop visible in both GitHub light & dark themes -->
+  <rect x="2" y="2" width="876" height="181" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
 
-  <!-- Cockpit -->
-  <rect class="boxAccent" x="196" y="24" width="144" height="54"/>
-  <text class="title" x="268" y="47">TUI Cockpit</text>
-  <text class="sub" x="268" y="64">turf-tui</text>
+  <!-- Node 1: CLI & Tunnel -->
+  <rect x="20" y="24" width="136" height="58" rx="8" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <text x="88" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">CLI &amp; Tunnel</text>
+  <text x="88" y="66" font-family="Consolas, Menlo, monospace" font-size="11" fill="#334155" text-anchor="middle">turf-net</text>
 
-  <!-- Daemon -->
-  <rect class="box" x="392" y="24" width="144" height="54"/>
-  <text class="title" x="464" y="47">Session Daemon</text>
-  <text class="sub" x="464" y="64">turf-daemon</text>
+  <!-- Node 2: TUI Cockpit -->
+  <rect x="204" y="24" width="144" height="58" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.8"/>
+  <text x="276" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">TUI Cockpit</text>
+  <text x="276" y="66" font-family="Consolas, Menlo, monospace" font-size="11" fill="#1e40af" text-anchor="middle">turf-tui</text>
 
-  <!-- PTY / VTE -->
-  <rect class="box" x="588" y="24" width="144" height="54"/>
-  <text class="title" x="660" y="47">PTY &amp; Grid</text>
-  <text class="sub" x="660" y="64">turf-pty / vte</text>
+  <!-- Node 3: Session Daemon -->
+  <rect x="396" y="24" width="144" height="58" rx="8" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <text x="468" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">Session Daemon</text>
+  <text x="468" y="66" font-family="Consolas, Menlo, monospace" font-size="11" fill="#334155" text-anchor="middle">turf-daemon</text>
 
-  <!-- Shells / AI CLIs -->
-  <rect class="box" x="768" y="24" width="80" height="54"/>
-  <text class="title" x="808" y="47">Shells</text>
-  <text class="sub" x="808" y="64">codex/agy</text>
+  <!-- Node 4: PTY & VTE Grid -->
+  <rect x="588" y="24" width="144" height="58" rx="8" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <text x="660" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">PTY &amp; Grid</text>
+  <text x="660" y="66" font-family="Consolas, Menlo, monospace" font-size="11" fill="#334155" text-anchor="middle">turf-pty / vte</text>
 
-  <!-- Core / Protocol bottom row -->
-  <rect class="box" x="255" y="102" width="175" height="42"/>
-  <text class="title" x="342" y="120">Locks &amp; Worktrees</text>
-  <text class="sub" x="342" y="135">turf-core</text>
+  <!-- Node 5: Shells & CLIs -->
+  <rect x="768" y="24" width="92" height="58" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="814" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">Shells</text>
+  <text x="814" y="66" font-family="Consolas, Menlo, monospace" font-size="10.5" fill="#166534" text-anchor="middle">codex / agy</text>
 
-  <rect class="box" x="454" y="102" width="165" height="42"/>
-  <text class="title" x="536" y="120">Wire &amp; State Types</text>
-  <text class="sub" x="536" y="135">turf-protocol</text>
+  <!-- Core bottom left -->
+  <rect x="204" y="116" width="196" height="46" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="302" y="136" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle">Locks &amp; Worktrees</text>
+  <text x="302" y="152" font-family="Consolas, Menlo, monospace" font-size="11" fill="#92400e" text-anchor="middle">turf-core</text>
 
-  <!-- Horizontal arrows -->
-  <path class="bi" d="M 146 51 L 194 51"/>
-  <text class="lbl" x="170" y="43">WSS</text>
+  <!-- Protocol bottom right -->
+  <rect x="444" y="116" width="196" height="46" rx="8" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <text x="542" y="136" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle">IPC &amp; State Contracts</text>
+  <text x="542" y="152" font-family="Consolas, Menlo, monospace" font-size="11" fill="#334155" text-anchor="middle">turf-protocol</text>
 
-  <path class="bi" d="M 342 51 L 390 51"/>
-  <text class="lbl" x="366" y="43">IPC</text>
+  <!-- Horizontal arrows + labels -->
+  <line x1="158" y1="53" x2="201" y2="53" stroke="#64748b" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="180" y="45" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" fill="#475569" text-anchor="middle">WSS</text>
 
-  <path class="bi" d="M 538 51 L 586 51"/>
-  <text class="lbl" x="562" y="43">Bytes</text>
+  <line x1="350" y1="53" x2="393" y2="53" stroke="#64748b" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="372" y="45" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" fill="#475569" text-anchor="middle">IPC</text>
 
-  <path class="bi" d="M 734 51 L 766 51"/>
-  <text class="lbl" x="750" y="43">TTY</text>
+  <line x1="542" y1="53" x2="585" y2="53" stroke="#64748b" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="564" y="45" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" fill="#475569" text-anchor="middle">Stream</text>
 
-  <!-- Vertical links to Core & Protocol -->
-  <path class="line" d="M 285 78 L 285 100"/>
-  <path class="line" d="M 464 78 L 464 100"/>
+  <line x1="734" y1="53" x2="765" y2="53" stroke="#64748b" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="750" y="45" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" fill="#475569" text-anchor="middle">TTY</text>
+
+  <!-- Vertical connectors -->
+  <line x1="276" y1="84" x2="276" y2="113" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="468" y1="84" x2="468" y2="113" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="402" y1="139" x2="441" y2="139" stroke="#64748b" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
 </svg>
