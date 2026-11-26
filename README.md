@@ -16,10 +16,11 @@
 - **Instant Session Pairing**: Host any local repository (`turf host [dir]`) and invite collaborators via a generated room code (`turf join <TURF-XXXX>`).
 - **Persistent Background Daemon (`turf-daemon`)**: Keeps PTY shells and running processes alive across client disconnects, terminal restarts, and `Alt+D` detaches over Unix domain sockets / Windows named pipes.
 - **Native Rust Spatial Multiplexer (`turf-tui`)**:
-  - Borderless split panes (horizontal & vertical) with 60fps `turf-vte` cell blitting and a Catppuccin Mocha / Obsidian Slate theme (`Color::Reset` native terminal transparency).
+  - Borderless, full-height split panes (horizontal & vertical) with 60fps `turf-vte` cell blitting and a Catppuccin Mocha / Obsidian Slate theme (`Color::Reset` native terminal transparency).
+  - Herdr-style unlimited horizontally scrollable tab strip (`<`, `>`, pinned `+` modal, and click/right-click `New tab` / `Rename` / `Close` context menu).
+  - Pane-bounded mouse drag selection + clipboard copy (OSC 52 / `clip.exe`), mouse wheel viewport scrollback, and clickable OSC 8 & wrapped URL hyperlinks.
   - 10,000-line scrollback ring buffer with live-view snap-back on input.
-  - Live foreground process introspection badges (e.g., `1: vim main.rs`, `2: cargo test`).
-  - Non-conflicting `Alt+...` navigation so `Tab`, `Ctrl+C`, and readline shortcuts pass straight through to your shell.
+  - Live foreground process introspection badges on split panes and non-conflicting `Alt+...` / `F1`–`F4` navigation so `Tab`, `Ctrl+C`, and readline shortcuts pass straight through to your shell.
 - **Atomic Multi-File Sequence Locking (`turf-core`)**: Acquires upfront locks across all declared target files simultaneously—failing fast on conflicts instead of leaving partial writes.
 - **Isolated Git Worktrees**: Runs tasks in isolated `.turf/worktrees/<task-id>` checkouts and squash-merges back with standard `Co-authored-by` trailers.
 - **Encrypted P2P State Sync (`turf-net`)**: Derives a 256-bit key from the room code and encrypts peer handshakes and state deltas with AES-256-GCM.
@@ -117,12 +118,13 @@ turf daemon start|stop|status    Manage the persistent background daemon
 | `Alt+V` / `Alt+H` *(or `Alt+S`)* | Split pane vertically / horizontally |
 | `F3` / `Alt+O` / `Alt+X` | Cycle split panes / Close active pane |
 | `Alt+B` | Toggle Intent Board sidebar |
-| `F2` / `Alt+P` *(or `Alt+Enter`)* | Toggle bottom command prompt focus |
+| `F2` / `Alt+P` *(or `Alt+Enter`)* | Open centered command modal (`/task`, `/lock`, `/split-h`, `/tab`) |
 | `Alt+Up` / `Alt+Down` | Scroll viewport history up / down |
 | `Shift+PageUp` / `Shift+PageDown` | Page through scrollback history |
 | `F1` / `Alt+?` | Show shortcuts & slash commands overlay |
 | `F4` / `Alt+D` | Detach from daemon session (keeps processes running) |
 | `Ctrl+Q` / `Alt+Q` | Quit cockpit |
+| Mouse Click / Drag / Scroll | Switch/scroll tabs, `+` new tab modal, tab menu (`New tab`/`Rename`/`Close`), pane-bounded copy, clickable OSC 8 links |
 
 ---
 

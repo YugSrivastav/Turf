@@ -29,6 +29,9 @@ pub const COLOR_TEXT_MUTED: Color = Color::Rgb(108, 112, 134);
 /// Catppuccin Surface2 dim text (#585b70).
 pub const COLOR_TEXT_DIM: Color = Color::Rgb(88, 91, 112);
 
+/// Catppuccin Crust dark text for bright accent pills (#11111b).
+pub const COLOR_CRUST: Color = Color::Rgb(17, 17, 27);
+
 /// Catppuccin Crust / dark slate active pill highlight (#1e2030 / #232838).
 pub const COLOR_ACTIVE_PILL: Color = Color::Rgb(30, 32, 48);
 
@@ -75,19 +78,19 @@ pub const GLYPH_TEE_B: char = '┴';
 pub struct Theme;
 
 impl Theme {
-    /// Sleek soft blue/slate pill for the active tab.
+    /// Sleek solid Catppuccin Blue pill with dark crust text (matching Herdr).
     pub fn active_tab_pill() -> Style {
         Style::default()
-            .bg(COLOR_ACTIVE_PILL)
-            .fg(COLOR_ACCENT)
+            .bg(COLOR_ACCENT)
+            .fg(COLOR_CRUST)
             .add_modifier(Modifier::BOLD)
     }
 
-    /// Inactive tab styling: muted text on header background.
+    /// Inactive tab styling: subtle dark pill with muted text.
     pub fn inactive_tab() -> Style {
         Style::default()
             .fg(COLOR_TEXT_MUTED)
-            .bg(COLOR_HEADER_BG)
+            .bg(COLOR_ACTIVE_PILL)
     }
 
     /// Add new tab "+" indicator styling.

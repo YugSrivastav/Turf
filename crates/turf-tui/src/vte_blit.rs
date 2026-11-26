@@ -71,16 +71,48 @@ pub fn vte_flags_to_modifiers(flags: CellFlags) -> Modifier {
     modifier
 }
 
+/// Selection span `(start_col, start_row)` to `(end_col, end_row)` in pane-local coordinates.
+pub type PaneSelection = ((u16, u16), (u16, u16));
+
+fn is_cell_selected(x: u16, y: u16, sel: PaneSelection) -> bool {
+    let ((sx, sy), (ex, ey)) = if (sel.0 .1, sel.0 .0) <= (sel.1 .1, sel.1 .0) {
+        (sel.0, sel.1)
+    } else {
+        (sel.1, sel.0)
+    };
+    if y < sy || y > ey {
+        return false;
+    }
+    if sy == ey {
+        x >= sx && x <= ex
+    } else if y == sy {
+        x >= sx
+    } else if y == ey {
+        x <= ex
+    } else {
+        true
+    }
+}
+
 /// Blit an entire `ScreenBuffer` directly into a Ratatui `Buffer` slice bounded by `area`.
-///
-/// This performs zero heap allocations during the render cycle, providing
-/// 60fps flicker-free terminal blitting with native transparency and clean cursor rendering.
 pub fn blit_screen_buffer(
     screen: &ScreenBuffer,
     area: Rect,
     buf: &mut Buffer,
     cursor: Option<(usize, usize)>,
     is_focused: bool,
+) {
+    blit_screen_buffer_with_selection(screen, area, buf, cursor, is_focused, None);
+}
+
+/// Blit an entire `ScreenBuffer` into a Ratatui `Buffer` slice with optional pane-local highlight selection.
+pub fn blit_screen_buffer_with_selection(
+    screen: &ScreenBuffer,
+    area: Rect,
+    buf: &mut Buffer,
+    cursor: Option<(usize, usize)>,
+    is_focused: bool,
+    selection: Option<PaneSelection>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -90,6 +122,7 @@ pub fn blit_screen_buffer(
     let cols = (area.width as usize).min(screen.cols());
     let viewport = screen.render_viewport_rows(screen.scroll_offset(), rows);
     let is_scrolled_back = screen.scroll_offset() > 0;
+    let selection_bg = RatColor::Rgb(69, 71, 90);
 
     for (y, row) in viewport.iter().take(rows).enumerate() {
         let dest_y = area.y + y as u16;
@@ -101,15 +134,31 @@ pub fn blit_screen_buffer(
                 None => continue,
             };
 
-            let c = if cell.c == '\0' || cell.c == ' ' {
-                ' '
-            } else {
-                cell.c
-            };
+            // Trailing continuation cell of a 2-column glyph
+            if cell.c == '\0' {
+                let dest_cell = &mut buf[(dest_x, dest_y)];
+                dest_cell.set_char(' ');
+                dest_cell.set_skip(true);
+                continue;
+            }
+
+            let c = if cell.c == ' ' { ' ' } else { cell.c };
 
             let mut fg = vte_color_to_ratatui(cell.fg, false);
-            let bg = vte_color_to_ratatui(cell.bg, true);
+            let mut bg = vte_color_to_ratatui(cell.bg, true);
             let mut modifier = vte_flags_to_modifiers(cell.flags);
+
+            // Highlight clickable OSC 8 hyperlinks with subtle underline when not already underlined
+            if cell.hyperlink.is_some() {
+                modifier |= Modifier::UNDERLINED;
+            }
+
+            // Apply pane-bounded selection highlight cleanly without bleeding across dividers
+            if let Some(sel) = selection {
+                if is_cell_selected(x as u16, y as u16, sel) {
+                    bg = selection_bg;
+                }
+            }
 
             // Render clean cursor using reverse video without neon green artifacts
             if let Some((cx, cy)) = cursor {
@@ -123,6 +172,7 @@ pub fn blit_screen_buffer(
             }
 
             let dest_cell = &mut buf[(dest_x, dest_y)];
+            dest_cell.set_skip(false);
             dest_cell.set_char(c);
             dest_cell.set_fg(fg);
             dest_cell.set_bg(bg);
@@ -133,6 +183,7 @@ pub fn blit_screen_buffer(
         for x in cols..(area.width as usize) {
             let dest_x = area.x + x as u16;
             let dest_cell = &mut buf[(dest_x, dest_y)];
+            dest_cell.set_skip(false);
             dest_cell.set_char(' ');
             dest_cell.set_bg(RatColor::Reset);
             dest_cell.set_fg(COLOR_TEXT_PRIMARY);
@@ -146,6 +197,7 @@ pub fn blit_screen_buffer(
         for x in 0..area.width {
             let dest_x = area.x + x;
             let dest_cell = &mut buf[(dest_x, dest_y)];
+            dest_cell.set_skip(false);
             dest_cell.set_char(' ');
             dest_cell.set_bg(RatColor::Reset);
             dest_cell.set_fg(COLOR_TEXT_PRIMARY);

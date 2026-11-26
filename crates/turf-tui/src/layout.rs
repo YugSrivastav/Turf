@@ -65,59 +65,23 @@ impl CockpitLayout {
 
         // Within main_area:
         // Row 0: Tab strip (height: 1)
-        // Row height-2: Input divider line (height: 1)
-        // Row height-1: Input bar prompt (height: 1)
-        // Center: Terminal surface
+        // Remaining rows: full-height Terminal surface (no permanent bottom input bar)
         let (tab_strip_area, terminal_area, input_divider_area, input_bar_area) =
-            if main_area.height >= 4 {
+            if main_area.height >= 2 {
                 let tab_strip = Rect {
                     x: main_area.x,
                     y: main_area.y,
                     width: main_area.width,
                     height: 1,
                 };
-                let term_h = main_area.height.saturating_sub(3);
+                let term_h = main_area.height.saturating_sub(1);
                 let term = Rect {
                     x: main_area.x,
                     y: main_area.y + 1,
                     width: main_area.width,
                     height: term_h,
                 };
-                let in_div = Rect {
-                    x: main_area.x,
-                    y: main_area.y + 1 + term_h,
-                    width: main_area.width,
-                    height: 1,
-                };
-                let in_bar = Rect {
-                    x: main_area.x,
-                    y: main_area.y + 2 + term_h,
-                    width: main_area.width,
-                    height: 1,
-                };
-                (tab_strip, term, in_div, in_bar)
-            } else if main_area.height == 3 {
-                (
-                    Rect {
-                        x: main_area.x,
-                        y: main_area.y,
-                        width: main_area.width,
-                        height: 1,
-                    },
-                    Rect {
-                        x: main_area.x,
-                        y: main_area.y + 1,
-                        width: main_area.width,
-                        height: 1,
-                    },
-                    Rect::default(),
-                    Rect {
-                        x: main_area.x,
-                        y: main_area.y + 2,
-                        width: main_area.width,
-                        height: 1,
-                    },
-                )
+                (tab_strip, term, Rect::default(), Rect::default())
             } else {
                 (main_area, Rect::default(), Rect::default(), Rect::default())
             };

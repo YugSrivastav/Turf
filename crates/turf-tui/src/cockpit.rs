@@ -11,7 +11,10 @@ use std::io::{self, stdout, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseButton, MouseEvent, MouseEventKind,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -26,14 +29,18 @@ use turf_protocol::intent::{TaskCard, TaskStatus};
 use turf_protocol::ipc::DaemonEvent;
 use turf_protocol::locks::FileLock;
 
-use crate::input::{render_input_bar, InputState};
+use crate::input::InputState;
 use crate::keys::key_to_bytes;
 use crate::layout::CockpitLayout;
 use crate::pane::{Pane, PaneBackend, PaneManager, SplitDirection};
 use crate::sidebar::{render_sidebar, SidebarState};
-use crate::tabs::{render_tab_strip, TabItem};
+use crate::tabs::{
+    compute_tab_strip_hits_scrolled, ensure_tab_visible, render_tab_strip_with_status, TabItem,
+    TabStripHit,
+};
 use crate::theme::{
-    COLOR_ACCENT, COLOR_ACTIVE_PILL, COLOR_HEADER_BG, COLOR_TEXT_MUTED, COLOR_TEXT_PRIMARY,
+    COLOR_ACCENT, COLOR_ACTIVE_PILL, COLOR_CRUST, COLOR_HEADER_BG, COLOR_MUTED_BORDER,
+    COLOR_TEXT_MUTED, COLOR_TEXT_PRIMARY,
 };
 
 /// Focus areas for spatial navigation.
@@ -51,6 +58,33 @@ pub struct Tab {
     pub pane_manager: PaneManager,
 }
 
+/// Interactive "new tab" / "rename tab" modal state triggered by `+` or tab context menu.
+#[derive(Debug, Clone, Default)]
+pub struct NewTabModalState {
+    pub active: bool,
+    pub rename_tab_index: Option<usize>,
+    pub input: InputState,
+}
+
+/// Tab bar dropdown menu (`New tab`, `Rename`, `Close`) matching Herdr.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TabContextMenuState {
+    pub active: bool,
+    pub tab_index: usize,
+    pub anchor_x: u16,
+    pub anchor_y: u16,
+    pub selected_item: usize,
+}
+
+/// Active mouse drag selection scoped strictly to a single pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaneSelectionState {
+    pub pane_id: usize,
+    pub start: (u16, u16),
+    pub end: (u16, u16),
+    pub dragging: bool,
+}
+
 /// The master Ratatui spatial multiplexer cockpit.
 pub struct TerminalCockpit {
     pub session_code: String,
@@ -62,8 +96,14 @@ pub struct TerminalCockpit {
     pub sidebar_state: SidebarState,
     pub tabs: Vec<Tab>,
     pub active_tab_index: usize,
+    pub tab_scroll_offset: usize,
     pub focus: FocusArea,
     pub input_state: InputState,
+    pub new_tab_modal: NewTabModalState,
+    pub tab_menu: TabContextMenuState,
+    pub selection: Option<PaneSelectionState>,
+    pub last_area: Rect,
+    pub status_toast: Option<(String, Instant)>,
     pub should_exit: bool,
     pub is_detached: bool,
     pub next_tab_id: usize,
@@ -97,8 +137,14 @@ impl TerminalCockpit {
             sidebar_state: SidebarState::default(),
             tabs: vec![tab],
             active_tab_index: 0,
+            tab_scroll_offset: 0,
             focus: FocusArea::Terminal,
             input_state: InputState::default(),
+            new_tab_modal: NewTabModalState::default(),
+            tab_menu: TabContextMenuState::default(),
+            selection: None,
+            last_area: Rect::new(0, 0, cols as u16, rows as u16),
+            status_toast: None,
             should_exit: false,
             is_detached: false,
             next_tab_id: 2,
@@ -132,8 +178,14 @@ impl TerminalCockpit {
             sidebar_state: SidebarState::default(),
             tabs: vec![tab],
             active_tab_index: 0,
+            tab_scroll_offset: 0,
             focus: FocusArea::Terminal,
             input_state: InputState::default(),
+            new_tab_modal: NewTabModalState::default(),
+            tab_menu: TabContextMenuState::default(),
+            selection: None,
+            last_area: Rect::new(0, 0, cols, rows),
+            status_toast: None,
             should_exit: false,
             is_detached: false,
             next_tab_id: 2,
@@ -242,8 +294,14 @@ impl TerminalCockpit {
             sidebar_state: SidebarState::default(),
             tabs: vec![tab],
             active_tab_index: 0,
+            tab_scroll_offset: 0,
             focus: FocusArea::Terminal,
             input_state: InputState::default(),
+            new_tab_modal: NewTabModalState::default(),
+            tab_menu: TabContextMenuState::default(),
+            selection: None,
+            last_area: Rect::new(0, 0, cols, rows),
+            status_toast: None,
             should_exit: false,
             is_detached: false,
             next_tab_id: 2,
@@ -342,12 +400,12 @@ impl TerminalCockpit {
         }
     }
 
-    /// Close active tab (unless it is the only remaining tab).
-    pub fn close_active_tab(&mut self) -> bool {
-        if self.tabs.len() <= 1 {
+    /// Close a specific tab by index (no-op if it is the only remaining tab).
+    pub fn close_tab_at(&mut self, index: usize) -> bool {
+        if self.tabs.len() <= 1 || index >= self.tabs.len() {
             return false;
         }
-        let removed_tab = self.tabs.remove(self.active_tab_index);
+        let removed_tab = self.tabs.remove(index);
         for pane in removed_tab.pane_manager.all_panes() {
             if let PaneBackend::Daemon { pane_id, client } = &pane.backend {
                 let pid = *pane_id as usize;
@@ -359,10 +417,37 @@ impl TerminalCockpit {
                 }
             }
         }
-        if self.active_tab_index >= self.tabs.len() {
+        if self.active_tab_index > index {
+            self.active_tab_index -= 1;
+        } else if self.active_tab_index >= self.tabs.len() {
             self.active_tab_index = self.tabs.len() - 1;
         }
+        self.tab_scroll_offset = self.tab_scroll_offset.min(self.tabs.len().saturating_sub(1));
+        self.sync_tab_scroll();
         true
+    }
+
+    /// Close active tab (unless it is the only remaining tab).
+    pub fn close_active_tab(&mut self) -> bool {
+        self.close_tab_at(self.active_tab_index)
+    }
+
+    fn sync_tab_scroll(&mut self) {
+        let layout = CockpitLayout::calculate(self.last_area, self.sidebar_visible);
+        if layout.tab_strip_area.width == 0 {
+            return;
+        }
+        let tab_items = self.build_tab_items();
+        let status_hint = self.status_toast.as_ref().map(|(s, _)| s.as_str());
+        self.tab_scroll_offset = ensure_tab_visible(
+            layout.tab_strip_area,
+            &tab_items,
+            self.active_tab_index,
+            self.tab_scroll_offset,
+            &self.session_code,
+            &self.role,
+            status_hint,
+        );
     }
 
     /// Split active pane in the current tab vertically or horizontally (live shell).
@@ -662,6 +747,360 @@ impl TerminalCockpit {
         }
     }
 
+    /// Open the Herdr-style centered "new tab" modal pre-filled with the next tab number.
+    pub fn open_new_tab_modal(&mut self) {
+        let default_label = self.next_tab_id.to_string();
+        self.new_tab_modal.active = true;
+        self.new_tab_modal.rename_tab_index = None;
+        self.new_tab_modal.input.cursor_pos = default_label.chars().count();
+        self.new_tab_modal.input.value = default_label;
+        self.tab_menu.active = false;
+        self.show_help = false;
+    }
+
+    /// Open the centered "rename tab" modal pre-filled with the target tab's label.
+    pub fn open_rename_tab_modal(&mut self, tab_idx: usize) {
+        if let Some(tab) = self.tabs.get(tab_idx) {
+            let current = if tab.title.trim().is_empty() || tab.title.eq_ignore_ascii_case("shell") {
+                tab.id.to_string()
+            } else {
+                tab.title.clone()
+            };
+            self.new_tab_modal.active = true;
+            self.new_tab_modal.rename_tab_index = Some(tab_idx);
+            self.new_tab_modal.input.cursor_pos = current.chars().count();
+            self.new_tab_modal.input.value = current;
+            self.tab_menu.active = false;
+            self.show_help = false;
+        }
+    }
+
+    fn submit_new_tab_modal(&mut self) {
+        let trimmed = self.new_tab_modal.input.value.trim().to_string();
+        let rename_idx = self.new_tab_modal.rename_tab_index.take();
+        self.new_tab_modal.active = false;
+        self.new_tab_modal.input.value.clear();
+        self.new_tab_modal.input.cursor_pos = 0;
+
+        if let Some(idx) = rename_idx {
+            if let Some(tab) = self.tabs.get_mut(idx) {
+                tab.title = if trimmed.is_empty() {
+                    tab.id.to_string()
+                } else {
+                    trimmed
+                };
+            }
+        } else {
+            let title = if trimmed.is_empty() {
+                self.next_tab_id.to_string()
+            } else {
+                trimmed
+            };
+            self.add_tab_auto(&title);
+            self.sync_tab_scroll();
+        }
+        self.focus = FocusArea::Terminal;
+    }
+
+    fn execute_tab_menu_action(&mut self, action_idx: usize) {
+        let target_idx = self.tab_menu.tab_index;
+        self.tab_menu.active = false;
+        match action_idx {
+            0 => self.open_new_tab_modal(),
+            1 => self.open_rename_tab_modal(target_idx),
+            2 => {
+                self.close_tab_at(target_idx);
+            }
+            _ => {}
+        }
+    }
+
+    /// Process a Crossterm mouse event (tab clicks, tab context menu, scrollable tab strip, `+` new tab modal, pane focus, bounded copy selection, OSC 8 links, wheel scroll).
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> bool {
+        let col = mouse.column;
+        let row = mouse.row;
+
+        // 1. Handle clicks when centered modals are active
+        if self.new_tab_modal.active {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                let geom = new_tab_modal_geometry(area);
+                if rect_contains(geom.save_btn, col, row) {
+                    self.submit_new_tab_modal();
+                    return true;
+                }
+                if rect_contains(geom.clear_btn, col, row) {
+                    self.new_tab_modal.input.value.clear();
+                    self.new_tab_modal.input.cursor_pos = 0;
+                    return true;
+                }
+                if rect_contains(geom.cancel_btn, col, row) || !rect_contains(geom.modal, col, row) {
+                    self.new_tab_modal.active = false;
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        if self.show_help {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                self.show_help = false;
+            }
+            return true;
+        }
+
+        // 2. Handle active tab context dropdown menu (`New tab`, `Rename`, `Close`)
+        if self.tab_menu.active {
+            let menu_rect = tab_context_menu_rect(self.tab_menu.anchor_x, self.tab_menu.anchor_y, area);
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if rect_contains(menu_rect, col, row)
+                        && row > menu_rect.y
+                        && row < menu_rect.y + menu_rect.height.saturating_sub(1)
+                    {
+                        self.tab_menu.selected_item = (row - menu_rect.y - 1) as usize;
+                    }
+                    return true;
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if rect_contains(menu_rect, col, row)
+                        && row > menu_rect.y
+                        && row < menu_rect.y + menu_rect.height.saturating_sub(1)
+                    {
+                        let action = (row - menu_rect.y - 1) as usize;
+                        self.execute_tab_menu_action(action);
+                        return true;
+                    }
+                    self.tab_menu.active = false;
+                    // Fall through if user clicked directly on tab strip
+                }
+                _ => {}
+            }
+        }
+
+        let layout = CockpitLayout::calculate(area, self.sidebar_visible);
+        let status_hint = self.status_toast.as_ref().map(|(s, _)| s.as_str()).map(str::to_string);
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Right) => {
+                if rect_contains(layout.tab_strip_area, col, row) {
+                    let tab_items = self.build_tab_items();
+                    for (rect, hit) in compute_tab_strip_hits_scrolled(
+                        layout.tab_strip_area,
+                        &tab_items,
+                        self.tab_scroll_offset,
+                        &self.session_code,
+                        &self.role,
+                        status_hint.as_deref(),
+                    ) {
+                        if rect_contains(rect, col, row) {
+                            if let TabStripHit::Tab(idx) = hit {
+                                self.selection = None;
+                                self.tab_menu = TabContextMenuState {
+                                    active: true,
+                                    tab_index: idx,
+                                    anchor_x: rect.x,
+                                    anchor_y: layout.tab_strip_area.y + 1,
+                                    selected_item: 0,
+                                };
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Tab strip hits (tabs, `<`, `>`, & `+` button)
+                if rect_contains(layout.tab_strip_area, col, row) {
+                    let tab_items = self.build_tab_items();
+                    for (rect, hit) in compute_tab_strip_hits_scrolled(
+                        layout.tab_strip_area,
+                        &tab_items,
+                        self.tab_scroll_offset,
+                        &self.session_code,
+                        &self.role,
+                        status_hint.as_deref(),
+                    ) {
+                        if rect_contains(rect, col, row) {
+                            match hit {
+                                TabStripHit::ScrollLeft => {
+                                    self.tab_scroll_offset = self.tab_scroll_offset.saturating_sub(1);
+                                }
+                                TabStripHit::ScrollRight => {
+                                    if self.tab_scroll_offset + 1 < self.tabs.len() {
+                                        self.tab_scroll_offset += 1;
+                                    }
+                                }
+                                TabStripHit::Tab(idx) => {
+                                    self.selection = None;
+                                    if idx == self.active_tab_index {
+                                        // Clicking active tab toggles Herdr tab context menu (`New tab`, `Rename`, `Close`)
+                                        self.tab_menu = TabContextMenuState {
+                                            active: true,
+                                            tab_index: idx,
+                                            anchor_x: rect.x,
+                                            anchor_y: layout.tab_strip_area.y + 1,
+                                            selected_item: 0,
+                                        };
+                                    } else {
+                                        self.tab_menu.active = false;
+                                        self.switch_tab(idx);
+                                        self.sync_tab_scroll();
+                                    }
+                                    self.focus = FocusArea::Terminal;
+                                }
+                                TabStripHit::AddButton => {
+                                    self.selection = None;
+                                    self.open_new_tab_modal();
+                                }
+                            }
+                            return true;
+                        }
+                    }
+                    return true;
+                }
+
+                // Terminal pane hit -> focus pane + begin pane-bounded selection anchor
+                if rect_contains(layout.terminal_area, col, row) {
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
+                        let pane_rects = tab.pane_manager.layout_rects(layout.terminal_area);
+                        if let Some((pane_id, rect)) =
+                            pane_rects.into_iter().find(|(_, r)| rect_contains(*r, col, row))
+                        {
+                            tab.pane_manager.set_active_pane(pane_id);
+                            self.focus = FocusArea::Terminal;
+                            let rel = (col - rect.x, row - rect.y);
+                            self.selection = Some(PaneSelectionState {
+                                pane_id,
+                                start: rel,
+                                end: rel,
+                                dragging: true,
+                            });
+                            return true;
+                        }
+                    }
+                }
+
+                // Sidebar click toggles focus to sidebar (or clicks `? help` footer)
+                if layout.sidebar_visible && rect_contains(layout.sidebar_area, col, row) {
+                    if let Some(sections) = layout.calculate_sidebar_sections() {
+                        let p = sections.peers_area;
+                        if p.height >= 3 && row == p.y + p.height.saturating_sub(1) {
+                            self.show_help = true;
+                            return true;
+                        }
+                    }
+                    self.selection = None;
+                    self.focus = FocusArea::Sidebar;
+                    return true;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(sel) = &mut self.selection {
+                    if sel.dragging {
+                        if let Some(tab) = self.tabs.get(self.active_tab_index) {
+                            let pane_rects = tab.pane_manager.layout_rects(layout.terminal_area);
+                            if let Some((_, rect)) =
+                                pane_rects.into_iter().find(|(id, _)| *id == sel.pane_id)
+                            {
+                                if rect.width > 0 && rect.height > 0 {
+                                    // Strictly clamp drag coordinates inside this single pane
+                                    let clamped_x = col.clamp(rect.x, rect.x + rect.width - 1);
+                                    let clamped_y = row.clamp(rect.y, rect.y + rect.height - 1);
+                                    sel.end = (clamped_x - rect.x, clamped_y - rect.y);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(mut sel) = self.selection.take() {
+                    if sel.dragging {
+                        sel.dragging = false;
+                        if sel.start != sel.end {
+                            let copied = self
+                                .tabs
+                                .get(self.active_tab_index)
+                                .and_then(|t| t.pane_manager.get_pane(sel.pane_id))
+                                .map(|p| p.extract_selected_text((sel.start, sel.end)))
+                                .unwrap_or_default();
+                            self.selection = Some(sel);
+                            if !copied.is_empty() {
+                                copy_to_clipboard(&copied);
+                                self.status_toast = Some((
+                                    format!("copied {} chars", copied.chars().count()),
+                                    Instant::now(),
+                                ));
+                            }
+                            return true;
+                        } else {
+                            // Single click without drag -> open OSC 8 / wrapped URL if present
+                            let link = self
+                                .tabs
+                                .get(self.active_tab_index)
+                                .and_then(|t| t.pane_manager.get_pane(sel.pane_id))
+                                .and_then(|p| p.link_at(sel.start.0, sel.start.1));
+                            if let Some(url) = link {
+                                open_external_url(&url);
+                                self.status_toast =
+                                    Some(("opened link".to_string(), Instant::now()));
+                            }
+                            return true;
+                        }
+                    }
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if rect_contains(layout.tab_strip_area, col, row) {
+                    self.tab_scroll_offset = self.tab_scroll_offset.saturating_sub(1);
+                    return true;
+                }
+                if rect_contains(layout.terminal_area, col, row) {
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
+                        let pane_rects = tab.pane_manager.layout_rects(layout.terminal_area);
+                        if let Some((pane_id, _)) =
+                            pane_rects.into_iter().find(|(_, r)| rect_contains(*r, col, row))
+                        {
+                            if let Some(pane) = tab.pane_manager.get_pane_mut(pane_id) {
+                                if !pane.terminal.is_alt_buffer() {
+                                    pane.terminal.scroll_up_viewport(3);
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if rect_contains(layout.tab_strip_area, col, row) {
+                    if self.tab_scroll_offset + 1 < self.tabs.len() {
+                        self.tab_scroll_offset += 1;
+                    }
+                    return true;
+                }
+                if rect_contains(layout.terminal_area, col, row) {
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
+                        let pane_rects = tab.pane_manager.layout_rects(layout.terminal_area);
+                        if let Some((pane_id, _)) =
+                            pane_rects.into_iter().find(|(_, r)| rect_contains(*r, col, row))
+                        {
+                            if let Some(pane) = tab.pane_manager.get_pane_mut(pane_id) {
+                                if !pane.terminal.is_alt_buffer() {
+                                    pane.terminal.scroll_down_viewport(3);
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
     /// Process a Crossterm keyboard event.
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         // --- 0. Help overlay dismissal ---
@@ -679,6 +1118,88 @@ impl TerminalCockpit {
                 return true;
             }
             return true;
+        }
+
+        // --- 0b. Centered New Tab modal (matching Herdr) ---
+        if self.new_tab_modal.active {
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(
+                    key.code,
+                    KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('u') | KeyCode::Char('U')
+                )
+            {
+                self.new_tab_modal.input.value.clear();
+                self.new_tab_modal.input.cursor_pos = 0;
+                return true;
+            }
+            match key.code {
+                KeyCode::Enter => {
+                    self.submit_new_tab_modal();
+                    return true;
+                }
+                KeyCode::Esc => {
+                    self.new_tab_modal.active = false;
+                    return true;
+                }
+                KeyCode::Backspace => {
+                    self.new_tab_modal.input.backspace();
+                    return true;
+                }
+                KeyCode::Delete => {
+                    self.new_tab_modal.input.delete();
+                    return true;
+                }
+                KeyCode::Left => {
+                    self.new_tab_modal.input.move_cursor_left();
+                    return true;
+                }
+                KeyCode::Right => {
+                    self.new_tab_modal.input.move_cursor_right();
+                    return true;
+                }
+                KeyCode::Home => {
+                    self.new_tab_modal.input.move_cursor_home();
+                    return true;
+                }
+                KeyCode::End => {
+                    self.new_tab_modal.input.move_cursor_end();
+                    return true;
+                }
+                KeyCode::Char(c) => {
+                    self.new_tab_modal.input.insert_char(c);
+                    return true;
+                }
+                _ => return true,
+            }
+        }
+
+        // --- 0c. Tab context menu keyboard navigation ---
+        if self.tab_menu.active {
+            match key.code {
+                KeyCode::Esc => {
+                    self.tab_menu.active = false;
+                    return true;
+                }
+                KeyCode::Up => {
+                    self.tab_menu.selected_item = if self.tab_menu.selected_item == 0 {
+                        2
+                    } else {
+                        self.tab_menu.selected_item - 1
+                    };
+                    return true;
+                }
+                KeyCode::Down => {
+                    self.tab_menu.selected_item = (self.tab_menu.selected_item + 1) % 3;
+                    return true;
+                }
+                KeyCode::Enter => {
+                    self.execute_tab_menu_action(self.tab_menu.selected_item);
+                    return true;
+                }
+                _ => {
+                    self.tab_menu.active = false;
+                }
+            }
         }
 
         // --- 1. Exit shortcut (Ctrl+Q or Alt+Q) ---
@@ -760,6 +1281,7 @@ impl TerminalCockpit {
             match key.code {
                 KeyCode::Char('t') | KeyCode::Char('T') => {
                     self.add_tab_auto("Shell");
+                    self.sync_tab_scroll();
                     return true;
                 }
                 KeyCode::Char('w') | KeyCode::Char('W') => {
@@ -807,6 +1329,34 @@ impl TerminalCockpit {
         // --- 6. Focus-Specific Key Handling ---
         match self.focus {
             FocusArea::Terminal => {
+                // Ctrl+Shift+C copies active pane selection if present
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.modifiers.contains(KeyModifiers::SHIFT)
+                    && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+                {
+                    if let Some(sel) = self.selection {
+                        let copied = self
+                            .tabs
+                            .get(self.active_tab_index)
+                            .and_then(|t| t.pane_manager.get_pane(sel.pane_id))
+                            .map(|p| p.extract_selected_text((sel.start, sel.end)))
+                            .unwrap_or_default();
+                        if !copied.is_empty() {
+                            copy_to_clipboard(&copied);
+                            self.status_toast = Some((
+                                format!("copied {} chars", copied.chars().count()),
+                                Instant::now(),
+                            ));
+                        }
+                        return true;
+                    }
+                }
+
+                // Clear active mouse selection highlight when typing into PTY
+                if self.selection.is_some() {
+                    self.selection = None;
+                }
+
                 // Keystrokes in terminal focus forward directly to the active PTY master
                 if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
                     if let Some(pane) = tab.pane_manager.active_pane_mut() {
@@ -830,6 +1380,9 @@ impl TerminalCockpit {
                     KeyCode::Enter => {
                         if let Some(cmd) = self.input_state.submit() {
                             self.execute_command(&cmd);
+                        }
+                        if self.focus == FocusArea::Input {
+                            self.focus = FocusArea::Terminal;
                         }
                         return true;
                     }
@@ -909,8 +1462,31 @@ impl TerminalCockpit {
         false
     }
 
+    fn build_tab_items(&self) -> Vec<TabItem> {
+        self.tabs
+            .iter()
+            .map(|t| {
+                let badge = t.pane_manager.active_pane().and_then(|pane| {
+                    let offset = pane.terminal.scroll_offset();
+                    if offset > 0 {
+                        Some(format!("[+{} lines]", offset))
+                    } else {
+                        None
+                    }
+                });
+                TabItem::new(t.id, t.title.clone()).with_scroll_badge(badge)
+            })
+            .collect()
+    }
+
     /// Render the full spatial multiplexer cockpit into Ratatui buffer.
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        self.last_area = area;
+        if let Some((_, ts)) = &self.status_toast {
+            if ts.elapsed() > Duration::from_secs(2) {
+                self.status_toast = None;
+            }
+        }
         let layout = CockpitLayout::calculate(area, self.sidebar_visible);
 
         // 1. Render Left Sidebar if visible
@@ -927,72 +1503,174 @@ impl TerminalCockpit {
             }
         }
 
-        // 2. Render Tab Strip (Top Row)
-        let tab_items: Vec<TabItem> = self
-            .tabs
-            .iter()
-            .map(|t| {
-                let badge = if let Some(pane) = t.pane_manager.active_pane() {
-                    let offset = pane.terminal.scroll_offset();
-                    if offset > 0 {
-                        format!(" [+{} lines]", offset)
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-                let fg_cmd = t
-                    .pane_manager
-                    .active_pane()
-                    .and_then(|p| p.foreground_cmd.clone())
-                    .or_else(|| {
-                        let active = t.pane_manager.active_pane()?;
-                        if !active.title.is_empty() && active.title != "Shell 1" {
-                            Some(active.title.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .map(|cmd| if badge.is_empty() { cmd } else { format!("{}{}", cmd, badge) });
-                TabItem {
-                    id: t.id,
-                    title: format!("{}{}", t.title, badge),
-                    foreground_cmd: fg_cmd,
-                }
-            })
-            .collect();
-
-        render_tab_strip(
+        // 2. Render Tab Strip (Top Row - Herdr scrollable tabs + pinned `+`)
+        let tab_items = self.build_tab_items();
+        let status_hint = self.status_toast.as_ref().map(|(s, _)| s.as_str());
+        self.tab_scroll_offset = ensure_tab_visible(
             layout.tab_strip_area,
             &tab_items,
             self.active_tab_index,
+            self.tab_scroll_offset,
             &self.session_code,
             &self.role,
-            &self.username,
+            status_hint,
+        );
+
+        render_tab_strip_with_status(
+            layout.tab_strip_area,
+            &tab_items,
+            self.active_tab_index,
+            self.tab_scroll_offset,
+            &self.session_code,
+            &self.role,
+            status_hint,
             buf,
         );
 
-        // 3. Render Terminal Surface (borderless split panes)
+        // 3. Render Terminal Surface (borderless split panes, full height down to bottom)
+        let active_selection = self.selection.map(|s| (s.pane_id, (s.start, s.end)));
         if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
-            let is_term_focused = self.focus == FocusArea::Terminal;
-            tab.pane_manager
-                .render(layout.terminal_area, is_term_focused, buf);
+            let is_term_focused = self.focus == FocusArea::Terminal
+                && !self.new_tab_modal.active
+                && !self.tab_menu.active
+                && !self.show_help;
+            tab.pane_manager.render_with_selection(
+                layout.terminal_area,
+                is_term_focused,
+                active_selection,
+                buf,
+            );
         }
 
-        // 4. Render Input Bar (Bottom Row)
-        let is_input_focused = self.focus == FocusArea::Input;
-        render_input_bar(
-            layout.input_divider_area,
-            layout.input_bar_area,
-            &self.input_state,
-            is_input_focused,
-            buf,
-        );
+        // 4. Render dropdowns & centered modals on demand
+        if self.tab_menu.active {
+            self.render_tab_context_menu(area, buf);
+        }
+        if self.new_tab_modal.active {
+            self.render_new_tab_modal(area, buf);
+        } else if self.focus == FocusArea::Input {
+            self.render_command_modal(area, buf);
+        }
 
         // 5. Render Shortcuts Help Overlay if toggled
         if self.show_help {
             self.render_help_overlay(area, buf);
+        }
+    }
+
+    fn render_new_tab_modal(&self, area: Rect, buf: &mut Buffer) {
+        let geom = new_tab_modal_geometry(area);
+        if geom.modal.width < 20 || geom.modal.height < 6 {
+            return;
+        }
+        draw_modal_box(geom.modal, buf, COLOR_ACCENT);
+
+        let title = if self.new_tab_modal.rename_tab_index.is_some() {
+            "rename tab"
+        } else {
+            "new tab"
+        };
+        for (i, ch) in title.chars().enumerate() {
+            let x = geom.modal.x + 2 + i as u16;
+            if x + 1 < geom.modal.x + geom.modal.width {
+                let cell = &mut buf[(x, geom.modal.y + 1)];
+                cell.set_char(ch);
+                cell.set_style(Style::default().bg(COLOR_HEADER_BG).fg(COLOR_TEXT_PRIMARY));
+            }
+        }
+
+        // Highlighted single-line input bar inside modal
+        let input_row_y = geom.modal.y + 3;
+        for x in (geom.modal.x + 2)..(geom.modal.x + geom.modal.width.saturating_sub(2)) {
+            let cell = &mut buf[(x, input_row_y)];
+            cell.set_char(' ');
+            cell.set_style(Style::default().bg(COLOR_MUTED_BORDER).fg(COLOR_TEXT_PRIMARY));
+        }
+        let max_chars = geom.modal.width.saturating_sub(5) as usize;
+        for (i, ch) in self.new_tab_modal.input.value.chars().take(max_chars).enumerate() {
+            let x = geom.modal.x + 2 + i as u16;
+            let cell = &mut buf[(x, input_row_y)];
+            cell.set_char(ch);
+            cell.set_style(Style::default().bg(COLOR_MUTED_BORDER).fg(COLOR_TEXT_PRIMARY));
+        }
+        let cursor_offset = (self.new_tab_modal.input.cursor_pos.min(max_chars)) as u16;
+        let cursor_x = geom.modal.x + 2 + cursor_offset;
+        if cursor_x + 1 < geom.modal.x + geom.modal.width {
+            buf[(cursor_x, input_row_y)]
+                .set_style(Style::default().bg(COLOR_ACCENT).fg(COLOR_CRUST));
+        }
+
+        // Action pills: [ ↵ save ]  [ ^c clear ]  [ esc cancel ]
+        draw_pill_button(geom.save_btn, " ↵ save ", true, buf);
+        draw_pill_button(geom.clear_btn, " ^c clear ", false, buf);
+        draw_pill_button(geom.cancel_btn, " esc cancel ", false, buf);
+    }
+
+    fn render_tab_context_menu(&self, area: Rect, buf: &mut Buffer) {
+        let menu_rect = tab_context_menu_rect(self.tab_menu.anchor_x, self.tab_menu.anchor_y, area);
+        if menu_rect.width < 12 || menu_rect.height < 5 {
+            return;
+        }
+        draw_modal_box(menu_rect, buf, COLOR_ACCENT);
+
+        let items = [" New tab", " Rename", " Close"];
+        for (i, label) in items.iter().enumerate() {
+            let y = menu_rect.y + 1 + i as u16;
+            let selected = i == self.tab_menu.selected_item;
+            let style = if selected {
+                Style::default()
+                    .bg(COLOR_ACCENT)
+                    .fg(COLOR_CRUST)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().bg(COLOR_HEADER_BG).fg(COLOR_TEXT_PRIMARY)
+            };
+            for dx in 1..(menu_rect.width - 1) {
+                let x = menu_rect.x + dx;
+                let cell = &mut buf[(x, y)];
+                cell.set_char(' ');
+                cell.set_style(style);
+            }
+            for (ci, ch) in label.chars().take((menu_rect.width - 2) as usize).enumerate() {
+                let x = menu_rect.x + 1 + ci as u16;
+                let cell = &mut buf[(x, y)];
+                cell.set_char(ch);
+                cell.set_style(style);
+            }
+        }
+    }
+
+    fn render_command_modal(&self, area: Rect, buf: &mut Buffer) {
+        let box_w = 56u16.min(area.width.saturating_sub(4));
+        let box_h = 5u16.min(area.height.saturating_sub(2));
+        if box_w < 20 || box_h < 4 {
+            return;
+        }
+        let modal = Rect {
+            x: area.x + (area.width - box_w) / 2,
+            y: area.y + (area.height - box_h) / 2,
+            width: box_w,
+            height: box_h,
+        };
+        draw_modal_box(modal, buf, COLOR_ACCENT);
+
+        let header = "command (/task, /lock, /split-h, /tab, /quit)";
+        for (i, ch) in header.chars().take((box_w - 4) as usize).enumerate() {
+            let cell = &mut buf[(modal.x + 2 + i as u16, modal.y + 1)];
+            cell.set_char(ch);
+            cell.set_style(Style::default().bg(COLOR_HEADER_BG).fg(COLOR_TEXT_MUTED));
+        }
+        let input_y = modal.y + 2;
+        for x in (modal.x + 2)..(modal.x + box_w - 2) {
+            let cell = &mut buf[(x, input_y)];
+            cell.set_char(' ');
+            cell.set_style(Style::default().bg(COLOR_MUTED_BORDER).fg(COLOR_TEXT_PRIMARY));
+        }
+        let prompt = format!("> {}", self.input_state.value);
+        for (i, ch) in prompt.chars().take((box_w - 4) as usize).enumerate() {
+            let cell = &mut buf[(modal.x + 2 + i as u16, input_y)];
+            cell.set_char(ch);
+            cell.set_style(Style::default().bg(COLOR_MUTED_BORDER).fg(COLOR_TEXT_PRIMARY));
         }
     }
 
@@ -1091,13 +1769,9 @@ impl TerminalCockpit {
     where
         F: FnMut(&mut Self),
     {
-        // Enforce triple-lock mouse suppression directly on stdout conforming to [MD-044]
         let mut out = stdout();
-        let _ = out.write_all(b"\x1b[?1006l\x1b[?1016l\x1b[?1015l\x1b[?1005l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?9l");
-        let _ = out.flush();
-
         enable_raw_mode()?;
-        crossterm::execute!(out, EnterAlternateScreen)?;
+        crossterm::execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
 
         // 60fps target frame time = ~16.6ms
         let frame_duration = Duration::from_micros(16_666);
@@ -1125,11 +1799,14 @@ impl TerminalCockpit {
                 Duration::from_millis(1)
             };
 
-            // 4. Poll keyboard & resize events
+            // 4. Poll keyboard, mouse & resize events
             if event::poll(timeout)? {
                 match event::read()? {
                     Event::Key(key) => {
                         self.handle_key(key);
+                    }
+                    Event::Mouse(mouse) => {
+                        self.handle_mouse(mouse, self.last_area);
                     }
                     Event::Resize(_, _) => {
                         // Panes are resized on the next draw pass to their exact layout rects.
@@ -1141,15 +1818,195 @@ impl TerminalCockpit {
 
         // Cleanup terminal state upon exit
         disable_raw_mode()?;
-        crossterm::execute!(stdout(), LeaveAlternateScreen)?;
+        crossterm::execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
         Ok(())
     }
 
     /// Main 60fps frame blitting and event loop.
-    pub fn run_event_loop<B: Backend>(
-        &mut self,
-        terminal: &mut RatTerminal<B>,
-    ) -> Result<(), io::Error> {
+    pub fn run_event_loop<B: Backend>(&mut self, terminal: &mut RatTerminal<B>) -> Result<(), io::Error> {
         self.run_event_loop_with(terminal, |_| {})
+    }
+}
+
+struct NewTabModalGeometry {
+    modal: Rect,
+    save_btn: Rect,
+    clear_btn: Rect,
+    cancel_btn: Rect,
+}
+
+fn new_tab_modal_geometry(area: Rect) -> NewTabModalGeometry {
+    let box_w = 46u16.min(area.width.saturating_sub(2));
+    let box_h = 7u16.min(area.height.saturating_sub(2));
+    let modal = Rect {
+        x: area.x + area.width.saturating_sub(box_w) / 2,
+        y: area.y + area.height.saturating_sub(box_h) / 2,
+        width: box_w,
+        height: box_h,
+    };
+    let btn_y = modal.y + modal.height.saturating_sub(2);
+    let start_x = modal.x + (modal.width.saturating_sub(32)) / 2;
+    let save_btn = Rect { x: start_x, y: btn_y, width: 8, height: 1 };
+    let clear_btn = Rect { x: start_x + 10, y: btn_y, width: 10, height: 1 };
+    let cancel_btn = Rect { x: start_x + 22, y: btn_y, width: 12, height: 1 };
+    NewTabModalGeometry {
+        modal,
+        save_btn,
+        clear_btn,
+        cancel_btn,
+    }
+}
+
+fn tab_context_menu_rect(anchor_x: u16, anchor_y: u16, area: Rect) -> Rect {
+    let w = 15u16.min(area.width);
+    let h = 5u16.min(area.height);
+    let max_x = (area.x + area.width).saturating_sub(w);
+    let max_y = (area.y + area.height).saturating_sub(h);
+    Rect {
+        x: anchor_x.min(max_x),
+        y: anchor_y.min(max_y),
+        width: w,
+        height: h,
+    }
+}
+
+fn rect_contains(rect: Rect, x: u16, y: u16) -> bool {
+    rect.width > 0
+        && rect.height > 0
+        && x >= rect.x
+        && x < rect.x + rect.width
+        && y >= rect.y
+        && y < rect.y + rect.height
+}
+
+fn draw_modal_box(rect: Rect, buf: &mut Buffer, border_fg: ratatui::style::Color) {
+    let bg_style = Style::default().bg(COLOR_HEADER_BG).fg(COLOR_TEXT_PRIMARY);
+    let border_style = Style::default().bg(COLOR_HEADER_BG).fg(border_fg);
+    for dy in 0..rect.height {
+        for dx in 0..rect.width {
+            let x = rect.x + dx;
+            let y = rect.y + dy;
+            if x >= buf.area().width || y >= buf.area().height {
+                continue;
+            }
+            let is_top = dy == 0;
+            let is_bot = dy == rect.height - 1;
+            let is_left = dx == 0;
+            let is_right = dx == rect.width - 1;
+            let ch = if is_top && is_left {
+                '┌'
+            } else if is_top && is_right {
+                '┐'
+            } else if is_bot && is_left {
+                '└'
+            } else if is_bot && is_right {
+                '┘'
+            } else if is_top || is_bot {
+                '─'
+            } else if is_left || is_right {
+                '│'
+            } else {
+                ' '
+            };
+            let cell = &mut buf[(x, y)];
+            cell.set_char(ch);
+            cell.set_style(if is_top || is_bot || is_left || is_right {
+                border_style
+            } else {
+                bg_style
+            });
+        }
+    }
+}
+
+fn draw_pill_button(rect: Rect, label: &str, primary: bool, buf: &mut Buffer) {
+    let style = if primary {
+        Style::default()
+            .bg(COLOR_ACCENT)
+            .fg(COLOR_CRUST)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().bg(COLOR_ACTIVE_PILL).fg(COLOR_TEXT_PRIMARY)
+    };
+    for (i, ch) in label.chars().take(rect.width as usize).enumerate() {
+        let x = rect.x + i as u16;
+        if x < buf.area().width && rect.y < buf.area().height {
+            let cell = &mut buf[(x, rect.y)];
+            cell.set_char(ch);
+            cell.set_style(style);
+        }
+    }
+}
+
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = *chunk.get(1).unwrap_or(&0) as usize;
+        let b2 = *chunk.get(2).unwrap_or(&0) as usize;
+        out.push(TABLE[(b0 >> 2) & 0x3f] as char);
+        out.push(TABLE[((b0 & 0x03) << 4) | ((b1 >> 4) & 0x0f)] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((b1 & 0x0f) << 2) | ((b2 >> 6) & 0x03)] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[b2 & 0x3f] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn copy_to_clipboard(text: &str) {
+    let b64 = encode_base64(text.as_bytes());
+    let mut out = stdout();
+    let _ = write!(out, "\x1b]52;c;{b64}\x07");
+    let _ = out.flush();
+
+    let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists();
+    if cfg!(target_os = "windows") || is_wsl {
+        if let Ok(mut child) = std::process::Command::new("clip.exe")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+        }
+    }
+}
+
+fn open_external_url(url: &str) {
+    let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists();
+    if cfg!(target_os = "windows") || is_wsl {
+        // rundll32 passes URL query parameters (&, ?, =) intact without cmd.exe shell parsing
+        let _ = std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", url])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    } else if cfg!(target_os = "macos") {
+        let _ = std::process::Command::new("open")
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    } else {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
     }
 }

@@ -352,5 +352,25 @@ pub fn render_sidebar(
                 );
             }
         }
+
+        // Subtle footer hint on bottom row if peers don't occupy it (mirrors Herdr's clean footer)
+        let last_row = p.height.saturating_sub(1);
+        if p.height >= 3 && state.peers.len() < last_row as usize && p.width >= 6 {
+            let hint_y = p.y + last_row;
+            write_line(
+                p.x + 1,
+                hint_y,
+                p.width.saturating_sub(4),
+                "? help",
+                Style::default().fg(COLOR_TEXT_DIM).bg(COLOR_BG),
+                buf,
+            );
+            let arrow_x = p.x + p.width.saturating_sub(2);
+            if arrow_x < buf.area().width {
+                let cell = &mut buf[(arrow_x, hint_y)];
+                cell.set_char('«');
+                cell.set_style(Style::default().fg(COLOR_TEXT_DIM).bg(COLOR_BG));
+            }
+        }
     }
 }

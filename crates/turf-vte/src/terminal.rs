@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use vte::{Params, Perform};
 
 use crate::buffer::ScreenBuffer;
@@ -17,6 +19,7 @@ pub struct Terminal {
     current_fg: Color,
     current_bg: Color,
     current_flags: CellFlags,
+    current_hyperlink: Option<Arc<str>>,
     title: String,
     parser: vte::Parser,
 }
@@ -40,6 +43,7 @@ impl Terminal {
             current_fg: Color::Default,
             current_bg: Color::Default,
             current_flags: CellFlags::default(),
+            current_hyperlink: None,
             title: String::new(),
             parser: vte::Parser::new(),
         }
@@ -274,6 +278,7 @@ impl Terminal {
         self.current_fg = Color::Default;
         self.current_bg = Color::Default;
         self.current_flags.reset();
+        self.current_hyperlink = None;
         self.title.clear();
     }
 
@@ -423,8 +428,16 @@ impl Perform for Terminal {
 
         let cur_x = self.cursor().x;
         let cur_y = self.cursor().y;
-        let cell = Cell::new(c, self.current_fg, self.current_bg, self.current_flags);
+        let cell = Cell::new(c, self.current_fg, self.current_bg, self.current_flags)
+            .with_hyperlink(self.current_hyperlink.clone());
         self.active_buffer_mut().set_cell(cur_x, cur_y, cell);
+
+        if width == 2 && cur_x + 1 < cols {
+            // Mark second column of wide glyph as continuation cell so blitting avoids corrupting it.
+            let cont = Cell::new('\0', self.current_fg, self.current_bg, self.current_flags)
+                .with_hyperlink(self.current_hyperlink.clone());
+            self.active_buffer_mut().set_cell(cur_x + 1, cur_y, cont);
+        }
 
         self.cursor_mut().x = (cur_x + width).min(cols);
     }
@@ -678,6 +691,13 @@ impl Perform for Terminal {
             if code == b"0" || code == b"2" {
                 if let Ok(title_str) = std::str::from_utf8(params[1]) {
                     self.title = title_str.to_string();
+                }
+            } else if code == b"8" && params.len() >= 3 {
+                // OSC 8 ; params ; URI
+                if params[2].is_empty() {
+                    self.current_hyperlink = None;
+                } else if let Ok(uri) = std::str::from_utf8(params[2]) {
+                    self.current_hyperlink = Some(Arc::from(uri));
                 }
             }
         }

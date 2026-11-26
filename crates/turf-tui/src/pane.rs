@@ -12,7 +12,9 @@ use turf_pty::{PtyOptions, PtySession};
 use turf_vte::Terminal;
 
 use crate::theme::{Theme, COLOR_BG, GLYPH_DIVIDER_H, GLYPH_DIVIDER_V};
-use crate::vte_blit::blit_screen_buffer;
+use crate::vte_blit::{
+    blit_screen_buffer_with_selection, PaneSelection,
+};
 
 /// Orientation of a pane split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,6 +467,17 @@ impl Pane {
 
     /// Render borderless terminal output directly into Ratatui buffer.
     pub fn render(&mut self, area: Rect, is_focused: bool, buf: &mut Buffer) {
+        self.render_with_selection(area, is_focused, None, buf);
+    }
+
+    /// Render borderless terminal output with optional pane-local selection highlight.
+    pub fn render_with_selection(
+        &mut self,
+        area: Rect,
+        is_focused: bool,
+        selection: Option<PaneSelection>,
+        buf: &mut Buffer,
+    ) {
         self.resize(area);
         self.poll_pty();
 
@@ -474,12 +487,13 @@ impl Pane {
             None
         };
 
-        blit_screen_buffer(
+        blit_screen_buffer_with_selection(
             self.terminal.active_buffer(),
             area,
             buf,
             cursor,
             is_focused,
+            selection,
         );
 
         // Display subtle dimmed scrollback badge if scrolled up
@@ -498,6 +512,137 @@ impl Pane {
                 }
             }
         }
+    }
+
+    /// Extract visible text within a pane-local selection span without bleeding outside the pane.
+    pub fn extract_selected_text(&self, sel: PaneSelection) -> String {
+        let ((sx, sy), (ex, ey)) = if (sel.0 .1, sel.0 .0) <= (sel.1 .1, sel.1 .0) {
+            (sel.0, sel.1)
+        } else {
+            (sel.1, sel.0)
+        };
+        let buf = self.terminal.active_buffer();
+        let rows = buf.rows();
+        let cols = buf.cols();
+        if rows == 0 || cols == 0 {
+            return String::new();
+        }
+        let viewport = buf.render_viewport_rows(buf.scroll_offset(), rows);
+        let sy = (sy as usize).min(viewport.len().saturating_sub(1));
+        let ey = (ey as usize).min(viewport.len().saturating_sub(1));
+
+        let mut lines_out = Vec::new();
+        for y in sy..=ey {
+            let row = &viewport[y];
+            let start_col = if y == sy { sx as usize } else { 0 };
+            let end_col = if y == ey {
+                (ex as usize).min(row.len().saturating_sub(1))
+            } else {
+                row.len().saturating_sub(1)
+            };
+            if start_col > end_col || start_col >= row.len() {
+                lines_out.push(String::new());
+                continue;
+            }
+            let mut line = String::new();
+            for x in start_col..=end_col {
+                let ch = row[x].c;
+                if ch != '\0' {
+                    line.push(ch);
+                }
+            }
+            lines_out.push(line.trim_end().to_string());
+        }
+        lines_out.join("\n")
+    }
+
+    /// Resolve a clickable link (OSC 8 hyperlink or plain wrapped HTTP/HTTPS URL) at pane-local coordinates.
+    pub fn link_at(&self, rel_col: u16, rel_row: u16) -> Option<String> {
+        let buf = self.terminal.active_buffer();
+        let rows = buf.rows();
+        let cols = buf.cols();
+        let row_idx = rel_row as usize;
+        let col_idx = rel_col as usize;
+        if row_idx >= rows || col_idx >= cols {
+            return None;
+        }
+        let viewport = buf.render_viewport_rows(buf.scroll_offset(), rows);
+        let row = viewport.get(row_idx)?;
+        if let Some(cell) = row.get(col_idx) {
+            if let Some(link) = &cell.hyperlink {
+                if !link.is_empty() {
+                    return Some(link.to_string());
+                }
+            }
+        }
+
+        // Fallback: detect wrapped plain-text http(s):// URL spanning contiguous lines
+        let row_text = |r: &[turf_vte::Cell]| -> String {
+            r.iter()
+                .filter_map(|c| if c.c == '\0' { None } else { Some(c.c) })
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        };
+
+        let mut top = row_idx;
+        while top > 0 {
+            let prev = row_text(&viewport[top - 1]);
+            let curr = row_text(&viewport[top]);
+            if prev.chars().count() >= cols.saturating_sub(1)
+                && !prev.ends_with(' ')
+                && !curr.is_empty()
+                && !curr.starts_with(' ')
+            {
+                top -= 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut bottom = row_idx;
+        while bottom + 1 < viewport.len() {
+            let curr = row_text(&viewport[bottom]);
+            let next = row_text(&viewport[bottom + 1]);
+            if curr.chars().count() >= cols.saturating_sub(1)
+                && !curr.ends_with(' ')
+                && !next.is_empty()
+                && !next.starts_with(' ')
+            {
+                bottom += 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut joined = String::new();
+        let mut target_offset = None;
+        for idx in top..=bottom {
+            let t = row_text(&viewport[idx]);
+            if idx == row_idx {
+                target_offset = Some(joined.chars().count() + col_idx);
+            }
+            joined.push_str(&t);
+        }
+        let cursor = target_offset?;
+
+        for scheme in ["https://", "http://"] {
+            let mut search_from = 0;
+            while let Some(pos) = joined[search_from..].find(scheme) {
+                let start = search_from + pos;
+                let end = joined[start..]
+                    .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')'))
+                    .map(|rel| start + rel)
+                    .unwrap_or(joined.len());
+                let char_start = joined[..start].chars().count();
+                let char_end = joined[..end].chars().count();
+                if cursor >= char_start && cursor < char_end {
+                    return Some(joined[start..end].to_string());
+                }
+                search_from = end;
+            }
+        }
+        None
     }
 }
 
@@ -525,6 +670,19 @@ impl PaneManager {
 
     pub fn active_pane_id(&self) -> usize {
         self.active_pane_id
+    }
+
+    pub fn set_active_pane(&mut self, id: usize) -> bool {
+        if self.panes.contains_key(&id) {
+            self.active_pane_id = id;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn layout_rects(&self, area: Rect) -> Vec<(usize, Rect)> {
+        self.tree.layout(area).0
     }
 
     pub fn active_pane(&self) -> Option<&Pane> {
@@ -690,6 +848,17 @@ impl PaneManager {
 
     /// Render all borderless panes and clean split dividers.
     pub fn render(&mut self, area: Rect, terminal_focused: bool, buf: &mut Buffer) {
+        self.render_with_selection(area, terminal_focused, None, buf);
+    }
+
+    /// Render all borderless panes, split dividers, and optional active pane selection highlight.
+    pub fn render_with_selection(
+        &mut self,
+        area: Rect,
+        terminal_focused: bool,
+        selection: Option<(usize, PaneSelection)>,
+        buf: &mut Buffer,
+    ) {
         let (pane_rects, divider_rects) = self.tree.layout(area);
 
         // 1. Render divider lines between split panes
@@ -745,7 +914,8 @@ impl PaneManager {
         for (id, r) in pane_rects {
             if let Some(pane) = self.panes.get_mut(&id) {
                 let is_focused = terminal_focused && id == self.active_pane_id;
-                pane.render(r, is_focused, buf);
+                let pane_sel = selection.and_then(|(sid, span)| if sid == id { Some(span) } else { None });
+                pane.render_with_selection(r, is_focused, pane_sel, buf);
             }
         }
     }

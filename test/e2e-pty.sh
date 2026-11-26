@@ -82,11 +82,15 @@ wait_for_text "Shortcuts & Commands" 20
 tmux send-keys -t "$TMUX_SESS" Escape
 sleep 0.2
 
-# Test /task and duplicate /lock deduplication
+# Test /task and duplicate /lock deduplication via centered command modal
 tmux send-keys -t "$TMUX_SESS" "/task Fix E2E" Enter
 sleep 0.2
+tmux send-keys -t "$TMUX_SESS" M-Enter
+sleep 0.15
 tmux send-keys -t "$TMUX_SESS" "/lock src/main.rs" Enter
 sleep 0.2
+tmux send-keys -t "$TMUX_SESS" M-Enter
+sleep 0.15
 tmux send-keys -t "$TMUX_SESS" "/lock src/main.rs" Enter
 wait_for_text "active locks (1)" 20
 
