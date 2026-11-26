@@ -1,104 +1,51 @@
 # Contributing to TurfCode CLI
 
-Thank you for your interest in contributing to **TurfCode CLI**! We welcome bug reports, feature proposals, documentation updates, and pull requests from developers of all backgrounds.
+Contributions are welcome through Pull Requests against `main`. Because `main` is protected, direct pushes are disabled and every change goes through CI and maintainer review. All contributors follow our [Code of Conduct](./CODE_OF_CONDUCT.md) and private [Security Policy](./SECURITY.md).
 
-By participating in this project, you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.md).
+![TurfCode Contribution Flow](./docs/assets/contributing-flow.svg)
 
----
+## Setup & Branching
 
-## Repository Workflow (Pull Requests Only)
-
-The `main` branch is **protected**. Direct pushes to `main` are disabled—all changes must go through a **Pull Request (PR)** and receive maintainer review before merging.
-
-### 1. Fork & Clone
-
-1. Fork [YugSrivastav/turfcode-cli](https://github.com/YugSrivastav/turfcode-cli) on GitHub.
-2. Clone your fork locally and add `upstream`:
+Prerequisites: Rust stable toolchain (`2021` edition), Git `>= 2.20`, Node.js `>= 20`, and `tmux` (for interactive PTY tests on Linux/macOS/WSL).
 
 ```bash
-git clone https://github.com/<your-username>/turfcode-cli.git
+git clone https://github.com/YugSrivastav/turfcode-cli.git
 cd turfcode-cli
-git remote add upstream https://github.com/YugSrivastav/turfcode-cli.git
-```
-
-### 2. Create a Feature Branch
-
-Always branch from an up-to-date `main`:
-
-```bash
-git checkout main
-git pull upstream main
 git checkout -b feat/your-short-description
 ```
 
-Use clear branch prefixes such as `feat/`, `fix/`, `docs/`, `refactor/`, or `test/`.
+Use scoped branch prefixes such as `feat/`, `fix/`, `docs/`, `refactor/`, or `test/`. Before editing code, read [AGENTS.md](./AGENTS.md), [ROADMAP.md](./ROADMAP.md), [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), and [docs/ADR.md](./docs/ADR.md) (`MD-001` through `MD-056`).
 
-### 3. Make & Verify Your Changes
+## Where to Make Changes
 
-#### Prerequisites
-- **Rust**: Stable toolchain (`rustup toolchain install stable`)
-- **Node.js**: Version 20 or newer
-- **Git**: 2.20+
+- [crates/](./crates) : Active Rust CLI (`turf`, `turfcode`, `turf-daemon`), TUI cockpit, PTY/VTE engine, encrypted tunnel, and lock/worktree core. Put all shipping CLI fixes and features here.
+- [src/](./src) and [bin/](./bin) : Earlier Node.js ESM prototype and test suite. Update only when maintaining legacy behavior or porting features such as [src/agent-runner.js](./src/agent-runner.js) into Rust.
 
-#### Running Checks Locally
+## Verification
+
+Run the checks below before opening a Pull Request:
 
 ```bash
-# Stop any running background daemon so socket status tests don't race
+# Stop any running background daemon so socket status tests do not race
 turf daemon stop || true
 
-# Rust workspace checks & tests
+# Rust formatting, linting, and workspace tests
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets
 cargo test --workspace -- --test-threads=1
 
-# Real-user interactive PTY E2E suite (Linux/macOS/WSL with tmux)
+# Interactive tmux PTY E2E suite (Linux/macOS/WSL)
 bash test/e2e-pty.sh
 
-# Node.js dependencies & tests
-npm ci
-npm test
+# Legacy Node.js tests
+npm ci && npm test
 ```
 
-### 4. Commit Conventions
+## Commits, Docs & Pull Requests
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
+Follow [Conventional Commits](https://www.conventionalcommits.org/) such as `feat(tui): ...`, `fix(daemon): ...`, or `docs: ...`.
 
-- `feat(tui): add pane search highlight`
-- `fix(daemon): handle stale Unix socket cleanup`
-- `docs: clarify lock manager invariants`
-- `test(core): add concurrent lock conflict case`
-
-If your change implements or updates a recorded architectural decision, reference its ID (for example, `[MD-055]`) and update [docs/ADR.md](./docs/ADR.md) if introducing a new architectural invariant.
-
-### 5. Open a Pull Request
-
-1. Push your branch to **your fork**:
-   ```bash
-   git push origin feat/your-short-description
-   ```
-2. Open a Pull Request against `YugSrivastav/turfcode-cli:main`.
-3. Fill out the [Pull Request template](./.github/PULL_REQUEST_TEMPLATE.md) clearly, link any related issues, and ensure all CI checks pass.
-4. Maintainers will review your PR and either request changes, approve and merge it, or close it with feedback.
-
----
-
-## Architectural Guidelines & Invariants
-
-Before modifying core subsystems, review:
-- [AGENTS.md](./AGENTS.md) — AI contributor guide, crate roles, and UI/platform rules.
-- [ROADMAP.md](./ROADMAP.md) — product vision, built features, and open roadmap.
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — system topology and crate responsibilities.
-- [docs/ADR.md](./docs/ADR.md) — architectural decision records (`MD-001` through `MD-056`).
-
-Key invariants to keep in mind:
-- **Never block the TUI event loop**: Keep PTY I/O and IPC non-blocking to preserve 60fps rendering.
-- **Never acquire partial file locks**: Multi-file lock requests must succeed atomically or fail fast.
-- **Never persist sensitive credentials**: Tokens and auth secrets stay in memory only and must never be written to `.turf/` or logs.
-- **Preserve non-conflicting PTY input**: Do not intercept raw `Tab` or shell `Ctrl+...` bindings when terminal panes are focused.
-
----
-
-## Reporting Issues
-
-- Use the [Bug Report](./.github/ISSUE_TEMPLATE/bug_report.yml) or [Feature Request](./.github/ISSUE_TEMPLATE/feature_request.yml) issue templates.
-- For security vulnerabilities, **do not open a public issue**—follow [SECURITY.md](./SECURITY.md).
+- Keep PTY polling and daemon IPC strictly non-blocking inside the 60fps UI loop.
+- Preserve multi-file atomic locking (fail fast with zero partial locks) and never write OAuth tokens or API keys to `.turf/` or logs.
+- Record new architectural decisions in [docs/ADR.md](./docs/ADR.md) (`[MD-057]` onward) and update [CHANGELOG.md](./CHANGELOG.md) under `[Unreleased]`.
+- Push your branch to GitHub and fill out the [Pull Request template](./.github/PULL_REQUEST_TEMPLATE.md). For bugs or proposals, use [Bug Report](./.github/ISSUE_TEMPLATE/bug_report.yml) or [Feature Request](./.github/ISSUE_TEMPLATE/feature_request.yml).
