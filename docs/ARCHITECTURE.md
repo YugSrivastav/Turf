@@ -1,133 +1,46 @@
 # TurfCode CLI — System Architecture
 
-> **Real-time multiplayer AI coding and terminal multiplexing in your shell.**
+This document outlines the technical architecture, crate layout, concurrency model, and UI invariants for **TurfCode CLI**. Recorded decisions and worker invariants live in [docs/ADR.md](./ADR.md).
 
-This document describes the technical architecture, core subsystems, and design invariants of **TurfCode CLI**. All design decisions and worker invariants are recorded in [docs/ADR.md](./ADR.md).
+![TurfCode Crate Architecture](./assets/architecture.svg)
 
----
+## 1. Problem & Topology
 
-## 1. Problem & Vision
+Single-terminal tools and AI coding CLIs break down when multiple humans or agents edit the same repository simultaneously. TurfCode coordinates parallel work through a host-peer workspace architecture:
 
-Most terminal environments and AI coding harnesses are strictly single-player. Collaborating on a codebase in real time usually falls back to screen sharing, manual git branch ping-pong, or browser-based editors.
+- The **Host Machine** ([turf-net](./../crates/turf-net), [turf-daemon](./../crates/turf-daemon), [turf-core](./../crates/turf-core)) owns the repository on disk, persistent PTY shells, Intent Board state, atomic file locks, and isolated `.turf/worktrees/*` checkouts.
+- **Collaborating Peers** ([turf-tui](./../crates/turf-tui), `TunnelClient`) authenticate via a room code (`TURF-XXXX`) using SHA-256 key derivation and AES-256-GCM encrypted handshakes—syncing tasks, locks, and terminal streams without persisting credentials to `.turf/session.json` or logs.
 
-**TurfCode CLI** transforms the native terminal into a multiplayer engineering cockpit:
+## 2. Workspace Layout
 
-- **Instant Pairing**: A host starts a session on a local repository (`turf host [dir]`) and receives an unambiguous room code (`TURF-XXXX`). Collaborators join over an encrypted WebSocket tunnel (`turf join <TURF-XXXX>`).
-- **Zero-Friction Collaborators**: Peers operate through a lightweight client connected to the host's workspace and lock coordinator—no full toolchain replication required for thin-client workflows.
-- **Collision-Free Parallelism**: An **Intent Board** paired with **Atomic Multi-File Sequence Locking** and **Isolated Git Worktrees** ensures concurrent developers and AI agents never overwrite each other's changes.
-- **Isolated Agent Quotas**: Peers supply their own session credentials during the encrypted handshake so each collaborator's AI agents run against their own quota.
-
----
-
-## 2. Host & Peer Topology
-
-```mermaid
-flowchart LR
-    subgraph Host["Host Machine (Authoritative Workspace)"]
-        Repo[(Local Git Repository)]
-        Daemon[turf-daemon<br/>Persistent PTY & IPC]
-        Core[turf-core<br/>LockManager & IntentBoard]
-        Worktrees[Git Worktrees<br/>.turf/worktrees/*]
-        TunnelServer[turf-net TunnelServer<br/>AES-256-GCM WSS]
-
-        Repo <--> Worktrees
-        Core <--> Worktrees
-        Daemon <--> Core
-        TunnelServer <--> Core
-    end
-
-    subgraph Peer["Peer Machine (Client)"]
-        PeerTUI[turf-tui Cockpit<br/>Ratatui + Crossterm]
-        TunnelClient[turf-net TunnelClient]
-
-        PeerTUI <--> TunnelClient
-    end
-
-    TunnelClient <-->|Encrypted WebSocket + Room Code Key| TunnelServer
-```
-
-### Host Responsibilities
-- **Authoritative State & Git Tree**: Owns the repository on disk, `.turf/` metadata, and worktree merges.
-- **Daemon & PTY Execution**: Hosts persistent background PTY sessions and executes agent/shell subprocesses within the workspace root.
-- **Lock & Merge Authority**: Coordinates atomic file locks and performs validation and squash-merging into the target branch with `Co-authored-by` trailers.
-
-### Peer Responsibilities
-- **Encrypted Handshake**: Authenticates via the session room code (`TURF-XXXX`) using SHA-256 key derivation and AES-256-GCM authenticated payloads.
-- **Local Input Loop**: Buffers keystrokes locally and synchronizes completed actions, intents, lock requests, and state deltas over the tunnel.
-- **Credential Isolation**: Supplies ephemeral credentials in memory only; sensitive tokens are never persisted to `.turf/session.json` or logs.
-
----
-
-## 3. Core Subsystems
-
-### 3.1 Rust Cargo Workspace (`crates/`)
-
-TurfCode's native implementation is organized into seven focused crates:
+### Rust Crates ([crates/](./../crates))
 
 | Crate | Responsibility |
 | :--- | :--- |
-| `turf-pty` | Cross-platform PTY allocation via `portable-pty` (POSIX PTY on Linux/macOS, ConPTY on Windows), non-blocking Tokio streaming channels, and foreground process introspection (`tcgetpgrp` + `/proc`). |
-| `turf-vte` | 2D character cell grid (`ScreenBuffer`), ANSI/TrueColor state machine via `vte`, DEC alternate screen buffer isolation (`?1049h`/`?1049l`), and a bounded 10,000-line `VecDeque` scrollback ring buffer. |
-| `turf-protocol` | Canonical data contracts for Intent Board tasks (`TaskCard`, `TaskStatus`), `FileLock`, `CoAuthor` trailers, and length-prefixed JSON-RPC IPC messages (`DaemonRequest`, `DaemonResponse`, `DaemonEvent`). |
-| `turf-core` | Concurrency and git safety engine: atomic `LockManager` (fail-fast multi-file locking, heartbeat TTL, PID liveness checks), `RwLock`-backed `IntentBoard` with atomic file writes, and `WorktreeManager`. |
-| `turf-daemon` | Persistent detached background server (`TurfDaemonServer`), Unix domain socket / Windows named pipe transport, 4-byte length-prefixed wire framing, background process polling, and auto-spawn discovery. |
-| `turf-tui` | Ratatui + Crossterm spatial multiplexer (`TerminalCockpit`) with borderless split panes (BSP tree), 60fps zero-allocation VTE cell blitter, Catppuccin Mocha / Obsidian Slate theme, and `Alt+...` navigation. |
-| `turf-net` | Encrypted P2P WebSocket tunnel (`TunnelServer`, `TunnelClient`), state delta replication (`TasksSync`, `LocksSync`, `PeersSync`), and unified CLI binaries (`turf`, `turfcode`). |
+| [turf-pty](./../crates/turf-pty) | Cross-platform PTY allocation via `portable-pty` (POSIX PTY / Windows ConPTY), non-blocking Tokio streaming, and foreground process inspection (`/proc` + `tcgetpgrp`). |
+| [turf-vte](./../crates/turf-vte) | 2D `ScreenBuffer`, ANSI/TrueColor parser via `vte`, DEC alternate screen isolation (`?1049h`/`?1049l`), OSC 8 hyperlinks, wide-glyph continuation cells, and a 10,000-line scrollback buffer. |
+| [turf-protocol](./../crates/turf-protocol) | Contracts for Intent Board tasks (`TaskCard`, `TaskStatus`), `FileLock`, `CoAuthor` trailers, and length-prefixed JSON-RPC daemon IPC (`DaemonRequest`, `DaemonResponse`, `DaemonEvent`). |
+| [turf-core](./../crates/turf-core) | Atomic fail-fast `LockManager` (heartbeat TTL & PID liveness checks), `RwLock`-backed `IntentBoard` atomic disk persistence, and `WorktreeManager`. |
+| [turf-daemon](./../crates/turf-daemon) | Persistent background server (`TurfDaemonServer`) over Unix domain socket / Windows named pipe with 4-byte length-prefixed framing, process polling, and parent `cwd` inheritance on splits. |
+| [turf-tui](./../crates/turf-tui) | Ratatui + Crossterm spatial cockpit (`TerminalCockpit`) with full-height split panes, 60fps zero-allocation VTE blitting, scrollable tabs, tab context menu, pane-bounded copy, and clickable URLs. |
+| [turf-net](./../crates/turf-net) | AES-256-GCM WebSocket tunnel (`TunnelServer`, `TunnelClient`), state delta replication, and `turf` / `turfcode` CLI binaries (`cli.rs`). |
 
-### 3.2 Node.js CLI & Prototype Modules (`bin/`, `src/`, `test/`)
+### Node.js ESM Prototype ([bin/](./../bin), [src/](./../src), [test/](./../test))
 
-The repository also includes a pure ESM Node.js layer (`"type": "module"`) providing `bin/turf.js` and modular components in `src/` (`cli.js`, `cockpit.js`, `intent-board.js`, `lock-manager.js`, `worktree-manager.js`, `agent-runner.js`, `tunnel.js`, `client.js`, `diff-viewer.js`, `file-tree.js`, `preflight.js`, `self-heal.js`, `theme.js`, `bell.js`), tested with Node's built-in test runner (`node --test`).
+The repository retains the initial Node.js ESM implementation (`cli.js`, `cockpit.js`, `intent-board.js`, `lock-manager.js`, `worktree-manager.js`, `agent-runner.js`, `tunnel.js`, `diff-viewer.js`), verified with `node --test`. See [AGENTS.md](./../AGENTS.md) and [ROADMAP.md](./../ROADMAP.md) for features still being ported to Rust.
 
----
+## 3. Concurrency & Safety Model
 
-## 4. Concurrency & Filesystem Safety Model
+![TurfCode Multiplayer Workflow](./assets/workflow.svg)
 
-Preventing race conditions between parallel developers and AI agents relies on three layered guarantees:
+1. Tasks declare their target file list upfront on the Intent Board (`[MD-040]`).
+2. `LockManager` acquires all declared locks atomically—any conflict fails fast with zero partial locks acquired (`[MD-002]`, `[MD-007]`, `[MD-023]`). Heartbeat TTLs and PID binding clean up stale locks after crashes; hosts keep an explicit `force_unlock` override.
+3. Each task runs inside an isolated `.turf/worktrees/<task-id>` checkout and squash-merges back into the target branch with `Co-authored-by` trailers (`[MD-022]`, `[MD-033]`).
 
-1. **Upfront Target Sequence Declaration (`[MD-040]`)**
-   Before modifying workspace files, a task declares its intent and the exact list/sequence of files it will touch.
-2. **Atomic Multi-File Locking (`[MD-002]`, `[MD-007]`, `[MD-023]`)**
-   `LockManager` attempts to lock **all** declared files atomically:
-   - If any file is already held by another active task, the request **fails fast** with zero partial locks acquired.
-   - Locks carry a heartbeat TTL and process PID binding so crashed processes never leave permanent deadlocks.
-   - Hosts retain an explicit `force_unlock` override.
-3. **Isolated Git Worktrees (`[MD-022]`, `[MD-033]`)**
-   Each task executes in an isolated git worktree under `.turf/worktrees/<task-id>` on branch `task/<task-id>`. Upon completion and verification, changes are squash-merged back with standard `Co-authored-by` trailers, and conflict states reset cleanly.
+## 4. Persistent Daemon & UI Ergonomics
 
----
+Closing the terminal window or detaching (`F4` / `Alt+D`) leaves running shells, editors, and AI CLIs alive inside [turf-daemon](./../crates/turf-daemon), ready to re-attach via `turf` or `turf attach [session]`. When background sockets are restricted (such as headless CI), `TerminalCockpit` falls back to standalone in-process PTY or headless modes.
 
-## 5. Persistent Daemon & Thin-Client Cockpit
-
-```mermaid
-sequenceDiagram
-    participant CLI as turf / turfcode
-    participant Daemon as turf-daemon (UDS / Pipe)
-    participant PTY as Child PTY Shell
-
-    CLI->>Daemon: ensure_daemon_running() + connect()
-    CLI->>Daemon: session.attach / pane.spawn
-    Daemon->>PTY: Spawn shell in PTY
-    loop 60fps Event Loop
-        PTY-->>Daemon: stdout/stderr bytes
-        Daemon-->>CLI: DaemonEvent::PaneOutput
-        CLI->>Daemon: DaemonRequest::WritePane (keystrokes)
-        Daemon->>PTY: Forward raw bytes
-    end
-    Note over CLI,Daemon: On Alt+D (Detach) or window close
-    CLI->>Daemon: session.detach
-    Note over Daemon,PTY: PTY & running jobs stay alive in daemon
-```
-
-- **Decoupled Lifecycle**: Closing the terminal window or detaching (`Alt+D`) leaves shells, editors, and builds running inside `turf-daemon`.
-- **Headless & Fallback Support**: In environments where background sockets are restricted, `TerminalCockpit` falls back cleanly to standalone in-process PTY mode (`new_standalone`) or headless mode (`new_headless`) for CI.
-
----
-
-## 6. UI & Ergonomics
-
-- **Spatial Layout**:
-  - **Top Row**: Full-width scrollable tab strip with active blue pill (`#89b4fa` / `#11111b`), `<` / `>` horizontal overflow arrows, pinned `+` `new tab` modal trigger, click/right-click tab context menu (`New tab`, `Rename`, `Close`), and right-aligned session status (`● TURF-XXXX • HOST`).
-  - **Left Sidebar (~22%)**: Borderless column separated by a single hairline vertical divider (`│`), displaying `spaces`, `intents & tasks`, `active locks`, `peers`, and a subtle `? help «` footer.
-  - **Main Surface**: Full-height borderless BSP split panes rendering VTE buffers directly onto native terminal transparency (`Color::Reset`), with pane-bounded mouse copy selection (OSC 52 / `clip.exe`), mouse wheel scrolling, and clickable OSC 8 / wrapped URLs.
-  - **On-Demand Modals**: Centered popups for `new tab` / `rename tab`, tab actions, `?` shortcuts overlay, and `F2` / `Alt+P` slash-command entry without consuming permanent terminal rows.
-- **Non-Conflicting Controls**: Multiplexer shortcuts use `Alt+...` and `F1`–`F4` combinations so `Tab` completion and `Ctrl+C` / `Ctrl+W` / `Ctrl+B` behave naturally inside running terminal programs.
+- Top row displays a full-width scrollable tab strip with `<` / `>` overflow arrows, pinned `+` modal trigger, click/right-click tab menu (`New tab`, `Rename`, `Close`), and right-aligned session badge (`● TURF-XXXX • HOST`).
+- Left sidebar (~22%) separates `spaces`, `intents & tasks`, `active locks`, `peers`, and `? help «` with single-line dividers (`│`, `─`).
+- Terminal panes span full height down to the bottom edge using native transparency (`Color::Reset`), non-conflicting `Alt+...` / `F1`–`F4` shortcuts, pane-bounded mouse copy (`OSC 52` / `clip.exe`), and clickable OSC 8 / wrapped URLs.
