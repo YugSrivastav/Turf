@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Persistent background daemon and IPC engine for TurfCode multiplexer"
+description = "Persistent background daemon and IPC engine for Turf multiplexer"
 
 [dependencies]
 turf-protocol = { path = "../turf-protocol" }

@@ -1,12 +1,12 @@
-# TurfCode CLI — System Architecture
+# Turf — System Architecture
 
-This document outlines the technical architecture, crate layout, concurrency model, and UI invariants for **TurfCode CLI**. Recorded decisions and worker invariants live in [docs/ADR.md](./ADR.md).
+This document outlines the technical architecture, crate layout, concurrency model, and UI invariants for **Turf**. Recorded decisions and worker invariants live in [docs/ADR.md](./ADR.md).
 
-![TurfCode Crate Architecture](./assets/architecture.svg)
+![Turf Crate Architecture](./assets/architecture.svg)
 
 ## 1. Problem & Topology
 
-Single-terminal tools and AI coding CLIs break down when multiple humans or agents edit the same repository simultaneously. TurfCode coordinates parallel work through a host-peer workspace architecture:
+Single-terminal tools and AI coding CLIs break down when multiple humans or agents edit the same repository simultaneously. Turf coordinates parallel work through a host-peer workspace architecture:
 
 - The **Host Machine** ([turf-net](./../crates/turf-net), [turf-daemon](./../crates/turf-daemon), [turf-core](./../crates/turf-core)) owns the repository on disk, persistent PTY shells, Intent Board state, atomic file locks, and isolated `.turf/worktrees/*` checkouts.
 - **Collaborating Peers** ([turf-tui](./../crates/turf-tui), `TunnelClient`) authenticate via a room code (`TURF-XXXX`) using SHA-256 key derivation and AES-256-GCM encrypted handshakes—syncing tasks, locks, and terminal streams without persisting credentials to `.turf/session.json` or logs.
@@ -23,7 +23,7 @@ Single-terminal tools and AI coding CLIs break down when multiple humans or agen
 | [turf-core](./../crates/turf-core) | Atomic fail-fast `LockManager` (heartbeat TTL & PID liveness checks), `RwLock`-backed `IntentBoard` atomic disk persistence, and `WorktreeManager`. |
 | [turf-daemon](./../crates/turf-daemon) | Persistent background server (`TurfDaemonServer`) over Unix domain socket / Windows named pipe with 4-byte length-prefixed framing, process polling, and parent `cwd` inheritance on splits. |
 | [turf-tui](./../crates/turf-tui) | Ratatui + Crossterm spatial cockpit (`TerminalCockpit`) with full-height split panes, 60fps zero-allocation VTE blitting, scrollable tabs, tab context menu, pane-bounded copy, and clickable URLs. |
-| [turf-net](./../crates/turf-net) | AES-256-GCM WebSocket tunnel (`TunnelServer`, `TunnelClient`), state delta replication, and `turf` / `turfcode` CLI binaries (`cli.rs`). |
+| [turf-net](./../crates/turf-net) | AES-256-GCM WebSocket tunnel (`TunnelServer`, `TunnelClient`), state delta replication, and `turf` CLI binary (`cli.rs`). |
 
 ### Node.js ESM Prototype ([bin/](./../bin), [src/](./../src), [test/](./../test))
 
@@ -31,7 +31,7 @@ The repository retains the initial Node.js ESM implementation (`cli.js`, `cockpi
 
 ## 3. Concurrency & Safety Model
 
-![TurfCode Multiplayer Workflow](./assets/workflow.svg)
+![Turf Multiplayer Workflow](./assets/workflow.svg)
 
 1. Tasks declare their target file list upfront on the Intent Board (`[MD-040]`).
 2. `LockManager` acquires all declared locks atomically—any conflict fails fast with zero partial locks acquired (`[MD-002]`, `[MD-007]`, `[MD-023]`). Heartbeat TTLs and PID binding clean up stale locks after crashes; hosts keep an explicit `force_unlock` override.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real-user interactive PTY E2E test suite for TurfCode CLI using tmux.
+# Real-user interactive PTY E2E test suite for Turf using tmux.
 # Verifies interactive hosting, working directory binding, multi-session isolation,
 # split pane navigation/closing, shortcuts overlay, lock deduplication, and pane automation.
 
@@ -96,7 +96,7 @@ wait_for_text "active locks (1)" 20
 
 # Detach cleanly via Alt+D
 tmux send-keys -t "$TMUX_SESS" M-d
-wait_for_text "Shutting down TurfCode session" 30
+wait_for_text "Shutting down Turf session" 30
 
 echo "[3/5] Verifying lowercase session attach isolation ('alpha' does not see host CWD output)..."
 tmux send-keys -t "$TMUX_SESS" "$TURF_BIN attach alpha" Enter

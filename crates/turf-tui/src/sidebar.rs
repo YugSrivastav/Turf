@@ -39,7 +39,7 @@ pub struct PeerInfo {
 impl Default for SidebarState {
     fn default() -> Self {
         Self {
-            current_space: "turfcode-cli".to_string(),
+            current_space: "turf".to_string(),
             current_branch: "main".to_string(),
             tasks: Vec::new(),
             selected_task_index: 0,

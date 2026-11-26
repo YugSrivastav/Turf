@@ -1,22 +1,22 @@
-# TurfCode CLI
+# Turf
 
-TurfCode turns your terminal into a shared workspace where developers and AI coding CLIs (`codex`, `claude`, `agy`) work inside the same repository without stepping on each other's changes. The shipping binary is built in Rust, alongside an earlier Node.js ESM prototype ([bin/](./bin), [src/](./src)).
+Turf turns your terminal into a shared workspace where developers and AI coding CLIs (`codex`, `claude`, `agy`) work inside the same repository without stepping on each other's changes. The active binary (`turf`) is written in Rust, alongside an earlier Node.js ESM prototype ([bin/](./bin), [src/](./src)).
 
 Further reading: [AGENTS.md](./AGENTS.md) for AI coding contributors, [ROADMAP.md](./ROADMAP.md) for current scope and open work, and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for full system design.
 
 ## How It Works
 
-![TurfCode Multiplayer Workflow](./docs/assets/workflow.svg)
+![Turf Multiplayer Workflow](./docs/assets/workflow.svg)
 
 A host shares any local directory with `turf host`, generating a `TURF-XXXX` pairing code over an AES-256-GCM WebSocket tunnel. Tasks declare target files on a shared Intent Board, take all-or-nothing file locks, run inside isolated git worktrees under `.turf/worktrees/`, and squash-merge cleanly back with `Co-authored-by` trailers.
 
 ## Architecture
 
-![TurfCode Crate Architecture](./docs/assets/architecture.svg)
+![Turf Crate Architecture](./docs/assets/architecture.svg)
 
 ### Crates
 
-- [turf-net](./crates/turf-net) : Interactive launcher (`turf` / `turfcode`), repository folder validation (including Windows-to-WSL path translation), room-code pairing, and encrypted P2P WebSocket sync.
+- [turf-net](./crates/turf-net) : Interactive launcher (`turf`), repository folder validation (including Windows-to-WSL path translation), room-code pairing, and encrypted P2P WebSocket sync.
 - [turf-tui](./crates/turf-tui) : 60fps Ratatui spatial cockpit with full-height split panes, horizontally scrollable tabs, tab context menu (`New tab`, `Rename`, `Close`), pane-bounded clipboard copy, and clickable hyperlinks.
 - [turf-daemon](./crates/turf-daemon) : Background session server keeping shells and child processes alive across `F4` / `Alt+D` detaches, re-attaches, and splits.
 - [turf-pty](./crates/turf-pty) : Cross-platform PTY allocation (POSIX PTY / Windows ConPTY) and foreground process inspection.

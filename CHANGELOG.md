@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **TurfCode CLI** are documented in this file.
+All notable changes to **Turf** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -25,4 +25,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Native Rust spatial multiplexer cockpit (`turf-tui`), cross-platform PTY (`turf-pty`), VTE grid (`turf-vte`), and atomic lock/worktree core (`turf-core`, `turf-protocol`) `[MD-045]`–`[MD-047]`.
 - Initial Node.js ESM CLI (`bin/turf.js`, `src/`) with Intent Board, atomic sequence locking, isolated git worktrees, live diff viewer, and WebSocket tunnel.
 
-[Unreleased]: https://github.com/YugSrivastav/turfcode-cli/compare/main...HEAD
+[Unreleased]: https://github.com/YugSrivastav/Turf/compare/main...HEAD

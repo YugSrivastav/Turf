@@ -2,7 +2,7 @@
 name = "turf-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core engine for TurfCode: atomic file locking, intent board, and git worktrees"
+description = "Core engine for Turf: atomic file locking, intent board, and git worktrees"
 
 [dependencies]
 turf-protocol = { path = "../turf-protocol" }
